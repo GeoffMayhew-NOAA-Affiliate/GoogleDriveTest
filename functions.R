@@ -14,35 +14,19 @@ if( !any(installed.packages()[, 1] == "crayon") ) install.packages("crayon")
 # to print in the console. However, those functions conflict with the highly-used flextable package, so crayon functions
 # will also be called explicity with the package name.
 
-
-#' TODO 
-#' *If you wanted to upload multiple files*, 
-#' can you make a convenient way to do this? allow local_path to be length >1?
+#' TODO
+#' *Create a single place to save shared_id aliases* (instead of hardcoding in gdrive_dir and gdrive_set_dribble)
 
 #' TODO
-#' *rename function arguments 'gdrive_path' to 'target?'* 
-#' Make something more explicit? 
-
-
-#' TODO
-#' *Currently version number looks at the most recent create date.* Make sure it's also max(version number?)
-#' Make g_path output include vector of version numbers?
+#' *request to delete files* through a function that sends an e-mail to users with delete privileges (cant find such 
+#' users with these privileges through drive_resources in the shared drive).  
 
 #======================================================================================================================#
 # Functions ####
 #======================================================================================================================#
 
 # This is a helper function for gdrive_dir() that checks for subfolders within folders
-gdrive_dir_search <- function(dribble) {
-  
-  # TODO 
-  # googledrive::drive_reveal(x, what = "path")
-  # This gives the whole path to a file or folder!
-  # 
-  
-  # dribble <- copy(fma_gdrive_dribble)
-  # dribble <- copy(new_parent)
-  # dribble <- copy(parent_search[[1]]$child)
+dir_search <- function(dribble) {
   
   dribble_lst <- vector(mode = "list", length = nrow(dribble))
   
@@ -91,9 +75,8 @@ gdrive_dir_search <- function(dribble) {
 
 # The function looks up and displays the folder structure of a shared drive. By default, it searches through the FMA 
 # Analytical Services shared drive.
-# TODO # Automatically omit some folder names from the search, or specify subfolders to focus the search on?
-# TODO Make this return only 'name' and not in dribble format so it cannot be abused? Return # of folders and files?
-
+#' TODO # Automatically omit some folder names from the search, or specify subfolders to focus the search on (e.g., projects
+#' or analyst folders)
 gdrive_dir <- function(shared_id = c("Analytics")) {
   # Search the folder structure of the FMA shared google drive
   
@@ -107,12 +90,12 @@ gdrive_dir <- function(shared_id = c("Analytics")) {
   # Get the dribble of the shared drive
   gdrive_dribble <- googledrive::shared_drive_get(id = id)
   parent <- copy(gdrive_dribble)
-  parent_search <- gdrive_dir_search(parent)
+  parent_search <- dir_search(parent)
   
   #while( !is.null(parent_search$child) ) {
   while( nrow(parent_search$child) > 0 ) {
     new_parent <- parent_search$child
-    new_parent_search <- gdrive_dir_search(new_parent)
+    new_parent_search <- dir_search(new_parent)
     parent_search <- list(
       parent = rbind(parent_search$parent, new_parent_search$parent),
       child = new_parent_search$child,
@@ -123,54 +106,47 @@ gdrive_dir <- function(shared_id = c("Analytics")) {
   # Omit the shared folder from the output
   folders_dt <- parent_search$parent[-1, ]
   # Omit the shared folder from name, and add a "/" to the path names to specify these are folders and not files
-  folders_dt$path_name <- sub(paste0(gdrive_dribble$name, "/"), "", paste0(folders_dt$name, "/"))
+  folders_dt$gdrive_path <- sub(paste0(gdrive_dribble$name, "/"), "", paste0(folders_dt$name, "/"))
 
   # Print the results
   cat("Shared Drive:", gdrive_dribble$name, "\n")
-  #print(folders_dt[order(folders_dt$name), ], justify = "left")
   
-  
-  new <- as.data.table(folders_dt[, c("path_name", "files")])
-  # Make sure everything is ordered alphabetically
-  new <- new[order(new$path_name)]
-  new$abbr_name <- gsub("([^/]+)(?=/.+)", "..", new$path_name, perl = T)  # close, just a bit too much
-  # Can I print all this using 'cat' so I don't have row numbers and I can color file names? Need to find max(nchar()) of abbr_name column
-  #print(new[, "abbr_name"], justify = "left")
-  
-  new$nchar <- nchar(new$abbr_name)
-  new$ws <- max(new$nchar) - new$nchar  
-  new$abbr_name <- apply(new, 1, function(x) paste0(x["abbr_name"], paste(rep(" ", times = x["ws"]), collapse = "")))
-  
-  new[, c("abbr_name", "files", "path_name")]
+  # Format the output
+  out <- as.data.table(folders_dt[, c("gdrive_path", "files")])
+  out <- out[order(out$gdrive_path)]
+  out$abbr_name <- gsub("([^/]+)(?=/.+)", "..", out$gdrive_path, perl = T)  # close, just a bit too much
+  out$nchar <- nchar(out$abbr_name)
+  out$ws <- max(out$nchar) - out$nchar  
+  out$Directory <- apply(out, 1, function(x) paste0(x["abbr_name"], paste(rep(" ", times = x["ws"]), collapse = "")))
+  out[, c("Directory", "files", "gdrive_path")]
   
 }
 
 #======================================================================================================================#
 
-# This function takes a path name from a shared drive and returns a single-row dribble to be used as the target for
-# uploads and downloads
-gdrive_target <- function(path_name, shared_id = "Analytics"){
-  # `path_name` is the path of the folders you want you focus on
+# This function takes a path name from a shared drive and returns a single-row dribble to be used as the target folder 
+# for uploads and downloads
+gdrive_set_dribble <- function(gdrive_path, shared_id = "Analytics"){
+  # `gdrive_path` is the google drive path of the one folder you want you target for uploads and downloads.
   
-  if( !is.character(path_name) | length(path_name) != 1) stop("'id' needs to be a length = 1 character string.")
+  if( !is.character(gdrive_path) | length(gdrive_path) != 1) stop("'id' needs to be a length = 1 character string.")
   if( !is.character(shared_id) | length(shared_id) != 1) stop("'shared_id' needs to be a length = 1 character string.")
   
-  # Recall Hard coded dids from an alias
+  # Recall Hard coded ids from an alias
   if( shared_id == "Analytics") {
-    shared_id <- "0AJcHJWlPgKIgUk9PVA"
+    id <- "0AJcHJWlPgKIgUk9PVA"
   }
   
-  # Search 
-  dribble_out <- googledrive::drive_get(path = path_name, shared_drive = googledrive::as_id(shared_id))
+  # Get the dribble object from the gdrive path. It will contain roww for all enclosed folders and files.
+  dribble_out <- googledrive::drive_get(path = gdrive_path, shared_drive = googledrive::as_id(id))
   
-  # Only allow folders to be set as targets!
+  # Only allow folders to be set as targets (exclude files)
   dribble_out <- dribble_out[sapply(dribble_out$drive_resource, "[[", "mimeType") == "application/vnd.google-apps.folder", ]
-  
   if( nrow(dribble_out) == 0 ){
-    stop(paste0("Path ", crayon::bold(path_name), " was not found!"))
+    stop(paste0("Path ", crayon::bold(gdrive_path), " was not found!"))
   } else if( nrow(dribble_out) > 1 ){
     stop({
-      cat(paste0("Path name ", crayon::bold(path_name), " is not specific enough. ", nrow(dribble_out), " matches found.\n"))
+      cat(paste0("Path name ", crayon::bold(gdrive_path), " is not specific enough. ", nrow(dribble_out), " matches found.\n"))
     })
   } else if ( nrow(dribble_out) == 1 ){
     dribble_out
@@ -181,32 +157,31 @@ gdrive_target <- function(path_name, shared_id = "Analytics"){
 
 # This function shows all files, and not folders, within the a specified folder, referenced by name. This function is 
 # really only for reference, and intentionally does not give results in dribble class.
-gdrive_ls <- function(target){
-  # `path_name` is the path of the folders you want you focus on
+gdrive_ls <- function(gdrive_dribble){
+
+  if( !googledrive::is_dribble(gdrive_dribble) | nrow(gdrive_dribble) != 1) stop("'gdrive_dibble' needs to be a nrow = 1 dribble.")
   
-  if( !googledrive::is_dribble(target) | nrow(target) != 1) stop("'target' needs to be a nrow = 1 dribble.")
-  
-  # Get all items in target
-  target_items <- googledrive::drive_ls(target)
+  # Get all items in gdrive_dibble
+  dribble_items <- googledrive::drive_ls(gdrive_dribble)
   # Subset to only files
-  target_items <- target_items[sapply(target_items$drive_resource, "[[", "mimeType") != "application/vnd.google-apps.folder"  ,]
+  dribble_items <- dribble_items[sapply(dribble_items$drive_resource, "[[", "mimeType") != "application/vnd.google-apps.folder"  ,]
   
-  if( nrow(target_items) == 0 ){
-    cat(paste0("No files exist in ", crayon::bold(target$path), ".\n"))
+  if( nrow(dribble_items) == 0 ){
+    cat(paste0("No files exist in ", crayon::bold(gdrive_dribble$path), ".\n"))
   } else {
     # Include the create dates in the output
     create_dates <- create_dates <- as.POSIXlt(
-      sapply(target_items$drive_resource, "[[", "createdTime"), 
+      sapply(dribble_items$drive_resource, "[[", "createdTime"), 
       format = "%Y-%m-%dT%H:%M:%OS", tz = "GMT")
     # Convert create dates to local timezone
-    target_items$create_date <- as.POSIXct(format(as.POSIXct(create_dates), tz = Sys.timezone(), usetz = T))
+    dribble_items$create_date <- as.POSIXct(format(as.POSIXct(create_dates), tz = Sys.timezone(), usetz = T))
     # Draw the file sizes from the drive_resources
-    target_items$size <- sapply(
-      as.integer(sapply(target_items$drive_resource, "[[", "size")),
+    dribble_items$size <- sapply(
+      as.integer(sapply(dribble_items$drive_resource, "[[", "size")),
       function(x) utils:::format.object_size(x, units = "auto"))
     # Return a data.frame without drive_resources so this object can't be abused as a dribble
-    target_items$file_name <- target_items$name
-    as.data.frame(target_items[, c("file_name", "create_date", "size")])
+    dribble_items$file_name <- dribble_items$name
+    as.data.frame(dribble_items[order(dribble_items$create_date, decreasing = T), c("file_name", "create_date", "size")])
   }
 }
 
@@ -224,7 +199,7 @@ parse_local_path <- function(local_path){
   # Get the name of the file (remove the directory, anything left if the final "/")
   name <- sub("^.*[/]", "", local_path)
   
-  # Identify the extension
+  # Identify the extension and exclude it from the
   if( grepl(pattern = "^(.+)[.?](.+)$", x = name) ) {
     # If an extension is found, grab it
     extension <- sub(pattern = "^(.*)(?=[.])", "", name, perl = T)  # Omit everything to the left of the last period
@@ -249,36 +224,42 @@ parse_local_path <- function(local_path){
 
 #======================================================================================================================#
 
-# A helper function to parse the google drive path, using the outputs of parse_local_path() to determine which files
+# A helper function to parse the google drive dribble, using the outputs of parse_local_path() to determine which files
 # to search for.
-parse_gdrive_path <- function(gdrive_path, l_path) {
-  # gdrive_path <- copy(gdrive_test_dribble); l_path <- parse_local_path(local_path)
+parse_dribble <- function(gdrive_dribble, l_path) {
+  # gdrive_dribble <- copy(gdrive_test_dribble); l_path <- parse_local_path(local_path)
+  
+  # Can the Gdrive folder be found?
+  if( !googledrive::is_dribble(gdrive_dribble) ) {
+    stop(paste0("'gdrive_dribble' must be specified as a dribble. Use ", italic("gdrive_set_dribble()"), " to do this."))
+  }
+  if( nrow(gdrive_dribble) != 1 ) stop("'gdrive_dribble' must be 1 row.")
   
   # Identify all folders/files in the gdrive path
-  gdrive_path_items <- googledrive::drive_ls(gdrive_path)
+  gdrive_items <- googledrive::drive_ls(gdrive_dribble)
   
   # If l_path has a version number, find that item specifically, Otherwise, match by name.
   if( l_path$ver_flag ) {
     
     # If a version flag is in l_path, does the specified version exist in the gdrive?
-    ver_exists <- l_path$name == gdrive_path_items$name
+    ver_exists <- l_path$name == gdrive_items$name
     if( sum(ver_exists) == 1 ){
-      gdrive_file <- gdrive_path_items[ver_exists, ]
+      gdrive_file <- gdrive_items[ver_exists, ]
     } else if( sum(ver_exists) > 1) {
       stop(paste0("File name is not unique!"))
     } else {
-      stop(cat(paste0(crayon::bold(l_path$name), " not found in ", crayon::bold(gdrive_path$name))))
+      stop(cat(paste0(crayon::bold(l_path$name), " not found in ", crayon::bold(gdrive_dribble$name))))
     }
     
   } else {
     # If a version flag is absent, search for all files with a similar l_path$name
     files_like_name_l <- grepl(
       pattern = paste0("^", l_path$name_no_ext, "_v[0-9]{3}", l_path$extension, "$"), 
-      x = gdrive_path_items$name, ignore.case = T)
-    gdrive_file <- gdrive_path_items[files_like_name_l, ]
+      x = gdrive_items$name, ignore.case = T)
+    gdrive_file <- gdrive_items[files_like_name_l, ]
   }
   
-  # Get the create dates
+  # Get the create dates (when each file was uploaded to the Gdrive)
   if( nrow(gdrive_file) > 0 ){
     create_dates <- as.POSIXlt(
       sapply(gdrive_file$drive_resource, "[[", "createdTime"), 
@@ -290,6 +271,23 @@ parse_gdrive_path <- function(gdrive_path, l_path) {
   create_dates <- create_dates[date_order]
   gdrive_file <- gdrive_file[date_order, ]
   
+  # Check if any files have duplicated names.
+  if( any(duplicated(gdrive_file$name)) ){
+    warning(paste0(
+      "Gdrive files ", crayon::bold(paste0(unique(gdrive_file$name[duplicated(gdrive_file$name)]), collapse = ", " )), 
+      " have duplicated file names. Fix this!"
+    ))
+  }
+  
+  # Make sure the order of create dates is in the same order of the version numbers.
+  if( 
+    any(diff(as.integer(sub(
+      "(.+)_v(?=[0-9]{3})", "", sub(paste0(l_path$extension, "$"), "", gdrive_file$name), perl = T
+    ))) >= 1)
+  ){
+    warning(paste0("Version numbers and create dates of Gdrive files are not in the same order! Fix this!"))
+  }
+
   # Return dribble of gdrive files and vector of create dates using local timezone
   list(files = gdrive_file, c_date_og = create_dates, c_date = format(as.POSIXct(create_dates), tz = Sys.timezone(), usetz = T))
 }
@@ -303,10 +301,10 @@ compare_local_and_gdrive <- function(l_path, g_path){
   # Get information of local file
   local_info <- file.info(l_path$path)
   
-  # Get extended information from the target files on the gdrive
-  # This retrieves the 'modified time' of the local file when it was uploaded (not the modified time of the object in
-  # the gdrive, which may be affected by things like file name changes)
-  # drive_reveal does take a little bit of time to run bit its MUCH faster than running drive_read_raw on large files
+  # Get extended information from the target files on the gdrive This retrieves the 'modified time' of the local file 
+  # when it was uploaded (not the modified time of the object in the gdrive, which may be affected by things like file 
+  # name changes)
+  # drive_reveal() does take a little bit of time to run bit its MUCH faster than running drive_read_raw on large files
   drive_rev_info <- googledrive::drive_reveal(g_path$files, what = "published")$revision_resource
   drive_mtime <- as.POSIXct(sapply(
     sapply(drive_rev_info, "[[", "modifiedTime"),
@@ -348,8 +346,8 @@ compare_local_and_gdrive <- function(l_path, g_path){
         googledrive::drive_read_raw(g_path$files[1,])
       )
       cat(paste0(
-        "Local file ", crayon::bold(l_path$name), " is identical to ", crayon::bold(g_path$files[1,]$name), 
-        " in spite of being modified recently.\n"
+        "Local file ", crayon::bold(l_path$name), " is identical ", crayon::bold(g_path$files[1,]$name), 
+        " although it was modified recently.\n"
       ))
     } 
   }
@@ -385,14 +383,8 @@ compare_local_and_gdrive <- function(l_path, g_path){
 # Uploads files to the specified directory in the shared Gdrive.
 gdrive_upload <- function(local_path, gdrive_dribble) {
   # 'local_path' is the path to the local file and must include the file extension.
-  # 'path' is the dribble of the gdrive where you want to upload the file to 
-  
-  
-  # local_path <- "Data/data_test.Rdata"; gdrive_dribble <- gdrive_test_dribble
-  
-  # FOR TESTING
-  # char_vec <- c(local_path, "file/missing_extension.txt", "file/missing_extension.", "file/.missingextension", "file/missing_extension", "file/something.other.txt", "file.txt")
-  
+  # 'path' is the dribble of the gdrive where you want to upload the file to.
+
   # Parse the local path to get the directory, file name, extension, and whether a version flag exists
   l_path <- parse_local_path(local_path)
   # If the local path doesn't exist, abort!
@@ -402,7 +394,7 @@ gdrive_upload <- function(local_path, gdrive_dribble) {
   if( l_path$ver_flag ) stop("Do not upload files with a version suffix!")
   
   # Parse the path to the google drive, looking for the files specified in local_path
-  g_path <- parse_gdrive_path(gdrive_dribble, l_path)
+  g_path <- parse_dribble(gdrive_dribble, l_path)
   
   # If other version of this file already exist on the drive...
   if( nrow(g_path$files) > 0  ) {
@@ -426,7 +418,7 @@ gdrive_upload <- function(local_path, gdrive_dribble) {
     most_recent <- g_path$files[1, ]
     
     # Print the count of instances of their object in the gdrive folder
-    cat(paste0(nrow(g_path$files), " instance(s) of ", crayon::bold(l_path$name), " found.\n"))
+    cat(paste0(nrow(g_path$files), " instance(s) of ", crayon::bold(l_path$name), " found in the Gdrive.\n"))
     cat(paste0("The most recent version is ", crayon::bold(most_recent$name), ", uploaded on ", g_path$c_date[1], ".\n\n" ))
 
     # Compare the local file with gdrive versions 
@@ -435,7 +427,9 @@ gdrive_upload <- function(local_path, gdrive_dribble) {
     # Skip the upload if the local is up to date or behind the gdrive
     if( local_check$local_up_to_date | local_check$local_minus_gdrive_mtime == -1 ){
       # If the gdrive is already up to date or ahead of the local, cancel the upload
-      return(cat("Skipping upload.\n"))
+      return(cat(paste0(
+        crayon::bold(l_path$name), " is identical to ", crayon::bold(most_recent$name), ". Skipping upload.\n"
+      )))
     }  
   } else {
     # If this name does not exist, assign it a version number starting with _v000
@@ -465,21 +459,18 @@ gdrive_upload <- function(local_path, gdrive_dribble) {
 # Downloads files to the specified directory in the shared Gdrive. Checks to make sure that the local data file exists
 # and is up-to-date with the Gdrive, and otherwise skips the download.
 gdrive_download <- function(local_path, gdrive_dribble) {
-  
   # `local_path` is the local path to where you want to save the file and contains the name of the file.
-  # `gdrive_path` is the dribble of the folder containing the file you want to pull
+  # `gdrive_dribble` is the dribble of the folder containing the file you want to pull
   
   # Parse the local path to determine whether the file exists locally and what to search for on the Gdrive.
   l_path <- parse_local_path(local_path)
   # Parse the Gdrive path, using l_path to determine what to search for in the Gdrive.
-  g_path <- parse_gdrive_path(gdrive_dribble, l_path)
+  g_path <- parse_dribble(gdrive_dribble, l_path)
   
   # Input checks
   # Can the directory in local_path be found?
   if( !file_test(op = "-d",  l_path$directory) ) {
     stop(paste0("Local path, ", crayon::bold(l_path$directory), ", not found."))} 
-  # Can the Gdrive folder be found?
-  if( !googledrive::is_dribble(gdrive_dribble) ) stop("The Gdrive location, 'gdrive_dribble', must be specified as a dribble.")
 
   # Vary the action depending on if a local version of the file exists and if the target is a specific version.
   if( l_path$local_exists ){
