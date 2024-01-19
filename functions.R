@@ -14,12 +14,43 @@ if( !any(installed.packages()[, 1] == "crayon") ) install.packages("crayon")
 # to print in the console. However, those functions conflict with the highly-used flextable package, so crayon functions
 # will also be called explicity with the package name.
 
+#' FIXME
+#' *I got a warning I shouldn't have* It says the local is behind the gdrive even though they are identical.
+#' gdrive_upload(local_path = your_file_path, gdrive_dribble = gdrive_test_dribble)
+# 1 instance(s) of geoff_mayhew_test.rdata found in the Gdrive.
+# The most recent version is geoff_mayhew_test_v000.rdata, uploaded on 2024-01-19 11:16:26 PST.
+# 
+# Warning: Local file geoff_mayhew_test.rdata is behind the gdrive!
+#   geoff_mayhew_test.rdata is identical to geoff_mayhew_test_v000.rdata. Skipping upload.
+#' *fix compare_local_and_gdrive* : apparently the modified date DOES NOT match the local file's modified date? Not sure why 
+#' I was getting different dates from my previous tests. Lately it's simply matching the Gdrive create date.
+#' *this means that the gdrive modified time will always be LATER than the local modified time!*
+#' # for some reason the drive_reveal()$modifiedTime is the local file's time for my ADP data, but new datasets that I
+#' # am creating have the same modifiedTime as the createdTime!
+#' # I guess this means we can skip using drive_reveal(), and if the gdrive is ahead, always check bytes? What a PITA
+#' *can I force the revision mtime to match the local_mtime?
+#' digging though drive_upload on the repo
+#' `https://github.com/tidyverse/googledrive/blob/main/R/drive_upload.R`*`
+#' I find params[["uploadType]] <- "multipart
+#' `https://developers.google.com/drive/api/guides/manage-uploads`
+#' # this should be the default of my function, so I'm not sure why the metadata is not being sent.
+
+
+#' TODO
+#' *Is the file extension used to make sure we can upload files with the same name but different extensions?*
+
+#' TODO
+#' *Are the file names case-sensitive*?
+
 #' TODO
 #' *Create a single place to save shared_id aliases* (instead of hardcoding in gdrive_dir and gdrive_set_dribble)
 
 #' TODO
 #' *request to delete files* through a function that sends an e-mail to users with delete privileges (cant find such 
 #' users with these privileges through drive_resources in the shared drive).  
+
+#' TODO
+#' basename() and dirname() functions can be simpler than using some of the regexp I employed
 
 #======================================================================================================================#
 # Functions ####
@@ -264,12 +295,11 @@ parse_dribble <- function(gdrive_dribble, l_path) {
     create_dates <- as.POSIXlt(
       sapply(gdrive_file$drive_resource, "[[", "createdTime"), 
       format = "%Y-%m-%dT%H:%M:%OS", tz = "GMT")
+    # Ensure the files are sorted by create dates
+    date_order <- order(create_dates, decreasing = T)
+    create_dates <- create_dates[date_order]
+    gdrive_file <- gdrive_file[date_order, ]
   } else create_dates <- NULL
-  
-  # Ensure the files are sorted by create dates
-  date_order <- order(create_dates, decreasing = T)
-  create_dates <- create_dates[date_order]
-  gdrive_file <- gdrive_file[date_order, ]
   
   # Check if any files have duplicated names.
   if( any(duplicated(gdrive_file$name)) ){
@@ -448,7 +478,7 @@ gdrive_upload <- function(local_path, gdrive_dribble) {
   if( upload_response == "Y"){
     googledrive::drive_upload(media = local_path, path = gdrive_dribble, name = gdrive_file_name, overwrite = FALSE)
   } else if ( upload_response == "N"){
-    stop("Upload to Gdriveaborted.")
+    stop("Upload to Gdrive aborted.")
   } else {
     stop("Response was not either 'Y' or 'N'. Aborting upload.")
   }
