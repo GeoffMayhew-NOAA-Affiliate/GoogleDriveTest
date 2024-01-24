@@ -259,12 +259,15 @@ gdrive_ls(path_name = "Yet a Third Folder")  # this works too, just not very spe
 
 
 # how quickly can we check whether a 252Mb file is identical?
+my_target <- gdrive_set_dribble("Google Drive Test/Another Subfolder/Yet a Third Folder/")
 local_path <- "C:/Users/geoff.mayhew/Work/GitHub/ADP/source_data/2024_Draft_ADP_data.rdata"
 gdrive_dribble <- copy(my_target)
 gdrive_upload(
   local_path,
   my_target
 )
+
+file.info(local_path)[c("mtime", "ctime")]
 
 gdrive_download(local_path, gdrive_dribble)  #
 
@@ -276,7 +279,7 @@ gdrive_download(local_path, gdrive_dribble)  #
 # FMA Analytical Services Program
 # Made a folder called 'Google Drive Test'
 
-fma_gdrive_dribble <- shared_drive_get(name = "FMA Analytical Services Program")
+fma_gdrive_dribble <- googledrive::shared_drive_get(name = "FMA Analytical Services Program")
 fma_gdrive_dribble  # This id should be stable for everyone, can probably be saved in our functions as well!
 
 drive_link(fma_gdrive_dribble)  # returns URL for the folder
@@ -302,11 +305,20 @@ gdrive_test_dribble
 
 
 # First, specify which folder to upload to 
-fma_gdrive_dribble <- shared_drive_get(name = "FMA Analytical Services Program")
+fma_gdrive_dribble <- googledrive::shared_drive_get(name = "FMA Analytical Services Program")
 # You can subset this to get a single ID
 gdrive_test_dribble <- drive_ls(fma_gdrive_dribble) %>% dplyr::filter(name == "Google Drive Test")
 # Upload the data file
 drive_upload_fma(local_path = "Data/data_test.Rdata", gdrive_dribble = gdrive_test_dribble)
+
+
+gdrive_test_dribble <- gdrive_set_dribble(gdrive_path = "Google Drive Test/")
+# Modify the data and then overwrite the local copy
+data_test <- cbind(data_test, new_col = F)
+save(data_test, file = "Data/data_test.Rdata")
+# Upload the modified local, bringing the Gdrive up to date
+gdrive_upload(local_path = "Data/data_test.Rdata", gdrive_dribble = gdrive_test_dribble)
+
 
 #======================================================================================================================#
 
@@ -514,3 +526,118 @@ readBin(to_read, what = "raw")
 
 
 load("C:/Users/geoff.mayhew/Work/GitHub/ADP/source_data/2024_Draft_ADP_data.rdata")
+
+
+
+# UPload something new
+
+my_test_data <- copy(airquality)
+gdrive_dir()
+gdrive_sub_dribble <- gdrive_set_dribble("Google Drive Test/Subfolder Test/")
+save(my_test_data, file = "Data/air_quality.rdata")
+# now upload it
+gdrive_upload(local_path = "Data/air_quality.rdata", gdrive_dribble = gdrive_sub_dribble)
+
+# Local modified time
+file.info("Data/air_quality.rdata")
+# gdrive modified time
+
+# Get the dribble of my air quality data
+gdrive_aq <- googledrive::drive_ls(googledrive::drive_get(gdrive_sub_dribble$id ))
+gdrive_aq$drive_resource[[1]]$modifiedTime
+gdrive_aq$drive_resource[[1]]$createdTime
+googledrive::drive_reveal(gdrive_aq, what = "published")$revision_resource[[1]]$modifiedTime
+
+
+# lets modifiy it any see what happens
+my_test_data <- cbind(my_test_data, new_col = "poopoo")
+save(my_test_data, file = "Data/air_quality.rdata")
+gdrive_upload(local_path = "Data/air_quality.rdata", gdrive_dribble = gdrive_sub_dribble)
+
+# use drive_update() to update the metadata of a drive file?
+gdrive_aq <- googledrive::drive_ls(googledrive::drive_get(gdrive_sub_dribble$id ))
+gdrive_aq[1, ]$drive_resource[[1]]
+#' From the repo under drive_upload: 
+#' *params <- toCamel(list2(...))*
+googledrive:::toCamel(list2(...))
+
+#' *from drive_upload help:, '...' argument*
+#' Named parameters to pass along to the Drive API. Has dynamic dots semantics. You can affect the metadata of the 
+#' target file by specifying properties of the Files resource via .... Read the "Request body" section of the Drive 
+#' API docs for the associated endpoint to learn about relevant parameters.
+
+
+gdrive_aq[1, ]$drive_resource[[1]]$modifiedTime
+class(gdrive_aq[1, ]$drive_resource[[1]]$modifiedTime)
+local_mtime <- file.info("Data/air_quality.rdata")$mtime
+# convert this to the format google wants
+new_mtime <- paste0(sub("(?<=[0-9])( )(?=[0-9])", "T", format(local_mtime, tz = "GMT"), perl = T), ".000Z")
+
+googledrive::drive_upload(
+  media = "Data/air_quality.rdata",
+  path = gdrive_sub_dribble,
+  name = "air_quality_v002.rdata",
+  overwrite = F,
+  modifiedTime = new_mtime
+)
+
+names(googledrive::drive_endpoints())  # I see "drive.files.create.media" the last entry here
+names(googledrive::drive_endpoints()$drive.files.create.media) 
+names(googledrive::drive_endpoints()$drive.files.create.media$parameters)
+names(googledrive::drive_endpoints()$drive.files.create.media$parameters)
+googledrive::drive_endpoints()$drive.files.create.media$parameters$modifiedTime
+a <- names(googledrive::drive_endpoints()$drive.files.create.media$parameters)
+a[order(a)]
+a[a %like% "modified"]  # I dont see any published' paramters here
+a[a %like% "Revi"]
+gdrive_aq <- googledrive::drive_ls(googledrive::drive_get(gdrive_sub_dribble$id ))
+
+
+gdrive_aq <- googledrive::drive_ls(googledrive::drive_get(gdrive_sub_dribble$id ))
+gdrive_aq  #Note that things are ordered by modified date, and my newest one is not first
+sapply(gdrive_aq$drive_resource, "[[", "modifiedTime")
+
+# TODO should I actually be modifying the creation date?
+names(gdrive_aq$drive_resource[[1]])
+gdrive_aq$drive_resource[[2]]$createdTime
+gdrive_aq$drive_resource[[2]]$modifiedTime
+gdrive_aq$drive_resource[[2]]$createdTime
+
+names(googledrive::drive_endpoints()$drive.files.create.media$parameters)
+googledrive::drive_endpoints()$drive.files.create.media$parameters$keepRevisionForever
+googledrive::drive_endpoints()$drive.files.create.media$parameters$description
+googledrive::drive_endpoints()$drive.files.create.media$parameters$uploadType
+
+# What if I do this again but change the uploadType to "multipart"?
+
+googledrive::drive_upload(
+  media = "Data/air_quality.rdata",
+  path = gdrive_sub_dribble,
+  name = "air_quality_v003.rdata",
+  overwrite = F,
+  uploadType = "multipart"
+)
+gdrive_aq <- googledrive::drive_ls(googledrive::drive_get(gdrive_sub_dribble$id ))
+
+gdrive_aq[1, ]$drive_resource[[1]]$modifiedTime 
+gdrive_aq[1, ]$drive_resource[[1]]$createdTime 
+
+gdrive_aq[3, ]$drive_resource[[1]]$modifiedTime 
+
+# is there a different thing I can modify? just annoying that renaming can mess up my modified time
+
+
+googledrive::drive_reveal(gdrive_aq[1, ], what = "published")$revision_resource[[1]]$modifiedTime
+
+gdrive_aq[1, ]$drive_resource[[1]]$modifiedTime
+# Could 
+
+
+googledrive::drive_reveal(gdrive_aq[3, ], what = "published")$revision_resource[[1]]$modifiedTime
+gdrive_aq[3, ]$drive_resource[[1]]$modifiedTime
+# When I manually changed the modify time, it changed both the one in drive_resources and revision_resources
+# 
+
+
+googledrive::drive_reveal(gdrive_aq[1, ], what = "published")$revision_resource[[1]]$modifiedTime
+gdrive_aq[1, ]$drive_resource[[1]]$modifiedTime
