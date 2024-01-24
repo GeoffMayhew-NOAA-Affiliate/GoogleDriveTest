@@ -1,0 +1,412 @@
+---
+title: "Shared Google Drive - Tools Tutorial"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# load packages and functions
+library(flextable)
+library(magrittr)
+#' NOTE! * In order to knit this script, you must make sure you've re-authorized your account! *
+#' *Run: googledrive::drive_auth()   *
+
+```
+
+# Introduction
+
+The **FMA Analytical Services Program** *Shared Google Drive differs* from our personal Google drives in that no one entity owns the content and has a strict hierarchy of roles with privileges for the users who are granted access:
+
+- The *\_NMFS AFSC Shared Drive Admins* account is the **manager** of the drive and has full privileges, including moving files/folders between shared drives.
+- Jason Jannot and Jennifer Ferdinand are **content managers** who can upload, edit, move and delete all files in the drive.
+- All other analysts have the **contributor** role, who can upload files, edit some files (e.g., edit Docs or Sheets but not overwrite entire files), *but not move or delete* files. 
+
+These roles are important so that there is virtually no possibility of accidentally deleting important files. Not being able to delete or overwrite files is perhaps the largest difference between shared and non-shared drives from a workflow standpoint. This document will outline how to operate within our permissions and introduce tools to use within R to improve upon our existing workflow.
+
+More on [Shared Drives](https://support.google.com/a/users/answer/7212025?hl=en&ref_topic=12369809&sjid=11972867759425993847-NA) and [Shared Drive Permissions](https://sites.google.com/noaa.gov/myafsc/technology/google-shared-drives?pli=1).
+
+---
+
+# Purpose
+
+- Cloud storage for the analyst team to house materials for the team, e.g., admin, training, presentations, peer-reviewed literature, non-code project materials such as Google documents, sheets, and slides.
+- Acts as a place to archive for files that would otherwise be lost when analysts leave FMA, resulting in the loss of all content on their NOAA Google drive accounts.
+- Serves as a secure location to save data files (e.g., `.Rdata` and `.rds`) that can be accessed by all analysts. As a rule, we do not save any data onto the GitHub repositories due to potential security concerns with confidential data and file size limitations. **This will be the focus of this document.**
+
+---
+
+## Google Drives and Git Workflow
+
+As mentioned previously, we do not (and must not) save any confidential data in our GitHub repositories. This, however, creates the issue of separating our code from the data it relies on to run. On collaborative projects with large datasets, it is time consuming and cumbersome to require each member to recreate the raw, wrangled, and result datasets from scratch and comes with the risk of creating non-identical datasets. Therefore, having team members download the same data files from a cloud such as with our *personal* NOAA Google drives is possible but comes with some issues:
+  
+  - One member is the sole 'owner' of the data, and other users have to be granted permissions to access it.
+  - It requires each analyst to ensure that their local copy of the data is up-to-date in case newer versions of the files are uploaded. 
+
+With *shared* Google drives, the analysts have the opportunity to create a robust system of managing their data. Shared Google drives are located separately from each analyst's *personal* NOAA Google drive and other drives they have access to. This means that for every member of a shared Google drive, the file path structure is identical, everyone has access (no permissions), and no single member is owner of the data. Such consistency allows us to develop tools to:
+
+- Upload *local* data files to any folder in the *shared* Gdrive drive from R.
+- Download the specific data files their scripts require to the same *local* path. This replaces navigating in an internet browser, downloading the needed file, and moving it to the folder specified by the scripts.
+- Implement versioning of data files, including:
+  - Automated checks for whether the local copy of a data file exists and is the most up-to-date version.
+  - Automated version tracking by adding suffixes to the file names during uploads to the Shared Google Drive.
+  - The option to download older versions of a data file so that older analyses use the data it was associated with.
+  
+---
+
+# Using the Google Drive Tools 
+
+In short, all of the functions start with the prefix `gdrive_`. There are three main functions: 
+
+  - `gdrive_set_dribble()` : to create an object that acts as our 'address' to a folder in our Shared GDrive
+  - `gdrive_upload()` : to upload files from our local to the specified Gdrive folder
+  - `gdrive_download()` : to download files from the specified Gdrive folder to our local
+
+Two more functions are useful for reference:
+
+ - `gdrive_dir()` : prints the file structure of the shared Gdrive
+ - `gdrive_ls()` : prints the contents a specified folder on the shared Gdrive
+  
+There are a few important concepts to understand how we will use these functions:
+
+Recall that **contributors don't have any delete privileges and cannot edit any non-Google suite files**. As a result, we cannot 'update' or 'replace' any data files and must instead upload a separate instance of any modified files. Additionally, anything we upload to the shared drive will remain there unless we ask a *content manager* to delete something. The upside is that it is extremely unlikely we will lose anything that is uploaded, but the reality is that the drive will accumulate many files and we must therefore be extremely organized in how we upload and download files. The functions introduced here were built to keep both the *Gdrive* and our *locals* organized.
+
+In general, on our *local* devices, we will modify and overwrite our data files as much as we want, just like any other script. We will periodically upload those data files to the Shared Gdrive where instead of overwriting the previous version, a new file is created with a modified filename that includes a *version suffix* that is used to track the history of the data file. Whenever the upload and download functions are run, they compare the *local* file and most recent *Gdrive* file to determine if either location needs to be brought up to date and provide messages and prompts if changes are needed. By pairing these functions with any `save()` and `load()` operation, we can mindlessly keep every team member's local and the Gdrive current while versioning every step of the way.
+
+## Getting started
+
+For now, all the frontend and backend functions that make up these these tools are contained in the `functions.R` script. In the future, these tools will be presented as a package, e.g., the `FMAAnalystFunctions` package. For now, we will manually install the packages it depends on before sourcing the functions script.
+
+**Open an instance of R/Rstudio and follow along by copy-pasting these command into your console.**
+
+First, you have to install the `googledrive` package (a part of the tidyverse) and grant it access to your Google drive via your NOAA e-mail using the `googledrive::drive_auth()` function. You will be prompted to open an internet browser window to complete this. You will only have to do this once. In the future, whenever `googledrive` functions are called, you may first be asked to re-specify which account you are granting access to, but you will be able to quickly select your NOAA e-mail. Also, install the `crayon` package, which is used by the functions to provide more formatting options to messages.
+
+```{r initialization, eval = F}
+#' Run this:
+install.packages("googledrive")
+install.packages("crayon")
+googledrive::drive_auth()
+```
+
+Note that we haven't loaded the `googledrive` package using `library(googldrive)`. The functions that will be introduced below serve as wrappers for the `googledrive` functions to prevent undesirable behaviors, such as saving files with identical names or overwriting local files. By not loading the `googldrive` package, you won't ever accidentally call the naked `drive_upload()` or `drive_download()` functions without our wrappers.
+
+Now, load the Gdrive tools.
+
+```{r load the functions script}
+#' Run this:
+source("functions.R")
+```
+
+Let's get familiar with thes functions.
+
+## Functions
+
+### **gdrive_dir()**
+
+**Syntax:** `gdrive_dir(shared_id = "Analytics")`
+
+This reference function prints the file structure of a shared drive. By default, it will show the file structure of the *FMA Analytical Services Program* shared drive, so you can simply run `gdrive_dir()` to get the output (it will probably look different from below depending on changes since this tutorial was last knit):
+
+```{r gdrive_dir, echo = T, eval = F}
+#' Run this:
+gdrive_dir()
+```
+
+```{r gdrive_dir_eval, echo = F, include = F}
+# I want to make the outputs of gdrive_dir() look prettier, so make it an object I can turn into a flextable later.
+gdrive_dir_print <- gdrive_dir()
+```
+
+```{r gdrive_dir_print, echo = F}
+gdrive_dir_print %>% flextable() %>% autofit()
+```
+
+**Note: If the gdrive_dir() function doesn't work**, it is likely that you have not yet been granted access to the *FMA Analytical Services Program* shared drive!
+
+`gdrive_dir()` is a convenience function that prints the full directory of the shared drive. It also prints the full file path of each folder you may upload to or download from, contained in the column `gdrive_path`.
+
+In this tutorial, we will practice uploading to and downloading from the `Google Drive Test/` folder, so **copy `Google Drive Test/` from the 'gdrive_path' column to your clipboard**. We are going to feed it to the next function, `gdrive_set_dribble()`.
+
+---
+
+### **gdrive_set_dribble()**
+
+**Syntax:** `gdrive_set_dribble(gdrive_path, shared_id = "Analytics")`
+
+In the background, the `googledrive` package uses an object class called **dribble**, or 'drive tibbles', to identify all items in a Google drive. They are essentially special data.frames, and we will use dribble objects to act as addresses for our Gdrive folders. Simply paste your `gdrive_path` as a character string into the `gdrive_set_dribble()` function and assign it a name.
+
+```{r set_dribble, echo = T, message = F}
+#' Run this:
+gdrive_test_dribble <- gdrive_set_dribble(gdrive_path = "Google Drive Test/")
+#' Take a look at the dribble object.
+gdrive_test_dribble
+```
+By including the full path of the location of the data of our projects into our scripts as the 'gdrive_path' argument of the `gdrive_set_dribble` function, we can be specific to ourselves and others about where our data lives. Ideally our dribble object will be created near the top of our scripts.
+
+---
+
+### **gdrive_ls()**
+
+**Syntax:** `gdrive_ls(gdrive_dribble)`
+
+`gdrive_ls()` is another reference function like `gdrive_dir()`, but instead of printing the folder names, it prints information about the files contained in that folder as a data.frame. Simply feed it the 'dribble' of the folder you want to peek into. It does not print the name of enclosed folders. It is a convenient way to view the change history of files, including the version numbers, creation dates, and file size. 
+
+```{r gdrive_ls, echo = T, eval = F}
+#' Run this:
+gdrive_ls(gdrive_test_dribble)
+```
+
+```{r gdrive_ls_eval, echo = F, include = T}
+gdrive_ls_print <- gdrive_ls(gdrive_test_dribble)
+```
+
+Similarly to `drive_dir()`, you won't ever include `drive_ls()` in your scripts, and will simply call them in your console as needed.
+
+---
+
+### **gdrive_upload()**
+
+**Syntax:** `gdrive_upload(local_path, gdrive_dribble)`
+
+This function uploads a single *local* file to a folder on the shared Gdrive specified by the 'gdrive_dribble' argument, your project's dribble. Before we try it out, we will create a data object and save it locally to our `Data/` folder. We will name it something unique to you so that it will be tracked as a brand new item on the drive, rather than a newer version of an existing file.
+
+First, make a copy of the `mtcars` dataset and assign it a name
+```{r make_data}
+#' Run this:
+your_data <- mtcars
+```
+
+Now, when we save our data object *locally*, we want to put a little thought into what we name it. File versions are tracked on the Gdrive according to the name of the file and the folder the data resides in, so you don't want to inadvertently re-use names! Using the code below, we will add your name to the file's name to differentiate it from any other pre-existing instances. For the sake of this tutorial, we will create a character string to represent your unique file path called `your_file_path`. It will have the syntax `Data/first_last_tutorial.rdata`. In practice, you would simply type the full file path as a character string as the 'file' argument of the `save()` function.
+
+```{r file_path, echo = F, message = F}
+#' This is run in the background
+your_file_path <- paste0("Data/", gsub("[.]", "_", Sys.info()[["user"]]), "_tutorial.rdata")
+gdrive_test_dribble <- gdrive_set_dribble(gdrive_path = "Google Drive Test/")
+```
+
+```{r save_data, echo = T, message = F, eval = F}
+#' Run this:
+your_file_path <- paste0("Data/", gsub("[.]", "_", Sys.info()[["user"]]), "_tutorial.rdata")
+save(your_data, file = your_file_path)
+your_file_path   # This is the path and filename of your unique file
+```
+
+#### Initial Upload
+
+You will now find your `.rdata` file saved *locally* in your `Data/` folder. Now, we will *upload* your file to the Gdrive's `Google Drive Test/` folder using the same local file path we used to save the file. The `gdrive_upload` function has two arguments: 
+
+- `local_path` : The full file path to the local file you want to upload, including the file extension, as a character string. The file name and extension specified here will be used to either: 1) name the new file on the Gdrive *OR* 2) associate it with pre-existing versions. 
+- `gdrive_dribble` : The *dribble* object of the Gdrive folder you want to upload to.
+
+Perform the upload with `gdrive_upload()`. When prompted to confirm this operation, enter `Y`. 
+
+```{r gdrive_upload, eval = F}
+#' Run this:
+gdrive_upload(local_path = your_file_path, gdrive_dribble = gdrive_test_dribble)
+```
+A confirmation will be printed out, informing you that your file was uploaded. Note that in the Gdrive, your file was uploaded with a *version suffix* (`_v###`) inserted after the end of the file name and before the file extension. The initial instance of a file will always have the suffix `_v000`, and subsequent uploads will increase to `_v001`, `_v002`, etc. 
+
+---
+
+#### Subsequent Uploads
+
+Now that your file exists in the `Google Drive Test` folder, the `gdrive_upload()` will assume slightly different behavior in the background if you run subsequent operations with the same arguments. The function will notice that the Gdrive folder already contains versions of your data file and will perform checks to make sure that the local file you are trying to upload is different from the most recently added version on the Gdrive. That is, it won't let you create another version on the Gdrive if your local version hasn't actually changed. Re-run the previous operation again to see the message.
+
+```{r gdrive_upload_no_edit, eval = F}
+#' Try running this
+gdrive_upload(local_path = your_file_path, gdrive_dribble = gdrive_test_dribble)
+```
+
+The function identified your *local version* and the *most recent Gdrive version* as identical and skips the upload. This behavior prevents you from creating consecutive duplicates of a file on the Gdrive. 
+
+*Locally, you are free to modify and overwrite your files as much as desired*. You should periodically use `gdrive_upload()` to re-send your updated data files to the *Gdrive*, ideally whenever you reach a major checkpoint in your analysis such as:
+
+  - when you feel like you're probably not going to make any further changes, like when you complete your raw data pulls or data wrangling stages.
+  - when an intermediate analysis is completed, such as for an Rmarkdown to share progress with your team. Consider whether you want your Rmarkdown files to be able to reproduce the documents from the data they were originally knit from (using versioned data) or if you want them to be able to run on the most up-to-date version of your data. You will use be able to download and use older versions of your data files when specified using `gdrive_download()`.
+  - when your projects are finished!
+
+Let's see what happens when you modify your data file, `save()` and overwrite your .rdata file, and try uploading it again.
+
+```{r editing_data, eval = F}
+#' Run this:
+#' Add a column to your data
+your_data$mpg_div_cyl <- round(your_data$mpg / your_data$cyl, 1)
+#' Save again to the same file path, overwriting your `local` version
+save(your_data, file = your_file_path)
+#' Upload your modified data file
+gdrive_upload(local_path = your_file_path, gdrive_dribble = gdrive_test_dribble)
+```
+
+Your console should print the message that your local file is **ahead** of the Gdrive, meaning that your local file not only has a more recent modified date/time but that the data in the file was actually modified. If you confirm the upload (entering 'Y' when prompted), you will also get a message that your file was uploaded with the suffix tag of `_v001`. 
+
+The `gdrive_upload` function is meant to be embedded in your code directly after your calls to `save()`. Although it is not necessary to perform an upload every time you save a new version, calling this function will remind you that your local version is ahead, and the upload can be aborted. 
+
+---
+
+### **gdrive_download()**
+
+**Syntax:** `gdrive_download(local_path, gdrive_dribble)`
+
+`gdrive_download()` is syntactically identical to `gdrive_upload()`, but the `local_path` argument can be used to grant more control over what data you want to save locally: either the most up-to-date version (without the version suffix) or older versions (with a version suffix).
+
+#### Most Recent Version
+
+Let's say that another team member wanted to run a new script that relies on your data. They would not yet have your data in their `Data/` folder, but they would know where to download it from on the Gdrive. 
+
+To simulate this, **navigate to and delete** your `r your_file_path` file! Then, perform the `gdrive_download()` as if your team member is trying pull your file from the Gdrive:
+
+```{r download_no_ver, eval = F}
+#' Run this AFTER deleting your local copy of your tutorial data!
+#' Download the most recent version of the wrangled dataset
+gdrive_download(local_path = your_file_path, gdrive_dribble = gdrive_test_dribble)
+```
+
+Note that the most recent version of the file was automatically downloaded from the Gdrive! Even though all Gdrive files have a *version suffix*, because your `local_path` does not have a version suffix, this asks `gdrive_download()` to fetch the most recent version, strip out the version suffix from the naame, and saves it locally. Remember, locally, data files with names without version suffixes are intended to be kept up-to-date with the Gdrive.
+
+By including the call to `gdrive_download()` in your script, you not only make it explicit to yourself and the team where the data lives on the Gdrive and where it should live locally, but by regularly running this code, everyone on the team can keep their local up-to-date whenever newer versions of the data file are uploaded. 
+
+---
+
+#### Older Version
+
+Keep in mind that even if we document all of the code for data pulls, the data in our databases might change over time, and analyses can't be recreated by others if the underlying data changes. Moreover, as an analysis develops, wrangled data or the results may change (e.g., new or renamed columns, additional objects). In such cases it is important to have the ability to grab and use older versions of our data. To do this with `gdrive_download()`, you simply need to specify which *version* of the dataset to download by including its *version suffix* in the `local_path` argument of the function. For instance, if you reached a checkpoint in an analysis that you want to share with your team in an Rmarkdown document, you will first `gdrive_upload()` your most recent local version of your dataset and take *note of its version number*. In your Rmarkdown script, you will then call `gdrive_download()` to create a local copy of the versioned data that you will then `load()` and use to knit the document.
+
+For example, let's say that I had an Rmarkdown that was initially knit using the initial version of our dataset, `_v000`. However, locally, I have since modified my local version several times, so if I were to try re-knitting the document, it would load my recently modified data. The output may show different results, or worse, it won't even run because I've made extensive changes to the data that cause script to throw errors during the knit!
+
+The soluion is easy. In my Rmarkdown, I simply make a call to `gdrive_download()` to save a local copy of the `_v000` version of the dataset to load!
+
+```{r download_with_ver, eval = F}
+#' Run this:
+# Make your `local_path` include `_v000` suffix in the filename
+your_file_path_v000 <- paste0("Data/", gsub("[.]", "_", Sys.info()[["user"]]), "_tutorial_v000.rdata")
+# Load version 0 of the dataset
+gdrive_download(local_path  = your_file_path_v000, gdrive_dribble = gdrive_test_dribble)
+load(your_file_path_v000)
+```
+
+You should now see the _v000 version of your data file saved locally in your `Data/` folder alongside the `current` version without the version suffix! Your Rmarkdown script can now load this older version of the data file and recreate your report, but your analysis can continue modifying the 'current' version.
+
+---
+
+## Example scripts
+
+Now that the uses of each function are understood, take a look at the following examples to see how these functions might be used in diffrent contexts.
+
+### Data Pull Script
+
+Our projects often require is to pull data from a database. It is a good idea to save the data from these raw data pulls and upload them to the Gdrive as these databases are constantly updated. Here is what a script that prepares raw data might look like.
+
+```{r example_raw, eval = F}
+#' [Example: Data Pull Script]
+
+#' Load packages
+library(odbc)
+
+#' *Identify the dribble for my project's data*
+project_dribble <- gdrive_set_dribble(gdrive_path = "Projects/My_Cool_Project")
+
+#' Set up oracle database channel
+channel <- dbConnect(
+  drv = odbc(), dsn = "AFSC", 
+  UID = rstudioapi::askForPassword("Database user"),
+  PWD = rstudioapi::askForPassword("Database password"))
+#' Pull my data. Get all trip data from 2023
+raw_data <- dbGetQuery(channel, paste(
+  "
+  SELECT * 
+  FROM norpac.atl_fma_trip 
+  WHERE extract(YEAR FROM start_date) = 2023
+  "
+))
+#' *Save my raw data*
+save(raw_data, file = "Data/raw_data.rdata")
+#' *Upload the raw data to the Gdrive*
+gdrive_upload(
+  local_path = "Data/raw_data.rdata",
+  gdrive_dribble = project_dribble
+)
+```
+
+### Data Wrangling/Analysis Script
+
+For a data wrangling or analysis script, you typically start your script loading locally saved data (raw or wrangled data, respectively). In either case, you should have the `gdrive_download()`code available to others so they can quickly make a local copy of the data YOU used. For instance, if they were to recreate your data pull, they might get different data from you if the database was updated! Also, by including `gdrive_download()` with a non-versioned filename specified, you ensure that the local matches the up-to-date version on the Gdrive. Your script should also end with the `save()` and `gdrive_upload()` code so that the Gdrive is kept up-to-date with any upstream changes to the wrangling or analysis.
+
+```{r example_wrangling, eval = F}
+#' [Example: Data Wrangling Script]
+
+#' *Identify the dribble for my project's data*
+project_dribble <- gdrive_set_dribble(gdrive_path = "Projects/My_Cool_Project")
+
+#' *Download the data from the gdrive and make sure it's up-to-date*
+gdrive_download(
+  local_path = "Data/raw_data.rdata", 
+  gdrive_dribble = project_dribble
+)
+#' *Load the raw data*
+load("Data/raw_data.rdata")
+
+#' Wrangle the data
+wrangled_data <- subset(
+  x = raw_data,
+  subset = DID_FISHING_OCCUR_FLAG == "Y",
+  select = c(
+    "CRUISE", "PERMIT", "TRIP_SEQ", "START_DATE", "END_DATE")
+)
+
+#' *Save the wrangled data*
+save(wrangled_data, file = "Data/wrangled_data.rdata")
+#' *Upload wrangled data to the Gdrive*
+gdrive_upload(
+  local_path = "Data/wrangled_data.rdata",
+  gdrive_dribble = project_dribble
+)
+```
+
+### Using Versioned Data
+
+If you want to recreate analysis or otherwise use older version of data, follow the below example to download prior versions rather than the most recent versions. The example below is for an Rmarkdown document but is generally applicable.
+
+```{r rmarkdown example, eval = F}
+# <!-- *Identify the dribble for my project's data* -->
+project_dribble <- gdrive_set_dribble(gdrive_path = "Projects/My_Cool_Project")
+
+# <!-- *Download the specific version of data used for this report* -->
+gdrive_download(
+  local_path = "Data/analysis_results_v004.rdata", 
+  gdrive_dribble = project_dribble
+)
+# <!-- *Load the raw data* -->
+load("Data/analysis_results_v004.rdata")
+
+# <!-- Use the data to share my old results! -->
+```
+
+---
+
+# Summary
+
+## Things you should do
+
+- Give descriptive names to your data files. Try to ignore extremely generic names like `data.rdata` or `results.rdata`. This prevents ambiguity for other analysts and reduces the likelihood that you or other analysts will upload completely new data files with identical file names (which will treat the file as an updated version rather than an initial instance!).
+- Your local files (e.g., *my_data.rdata*) may be modified/overwritten over time by your `save()` and `saveRDS()` functions as much as needed, but by periodically uploading that file to the gdrive, you will create separate versions (e.g., *my_data_v000.rdata*, *my_data_v001.rdata*, *my_data_v002.rdata*, etc). 
+- `gdrive_set_dribble` should be set near the beginning of each script so that everyone knows where the project's data lives and so future calls to upload or download data can reference this dribble object.
+- Generally follow any `save()` or `saveRDS` calls with `gdrive_upload()`, which keeps the Gdrive up-to-date.
+- Generally precede any `load() operations with gdrive_download()`, which keeps the local copy up-to-date.
+- `gdrive_dir()` and `gdrive_ls()` are helper functions serve as shortcuts to look into a shared drive or its folders rather than navigating through the drives via an internet browser window. They are meant for reference and nothing more. 
+
+---
+
+## Things to avoid
+
+- Although you can't delete or edit any non-Google file on the shared Gdrive, *contributors* are surprisingly *able to rename* files. For everyone's sanity, **do not rename files or folders** unless the renaming of specific folders/files is discussed with the entire analyst team. Changing these names will potentially break code and require modifying every affected Gdrive file path! It *can* be done, but only with proper communication and care!
+- Do not manually upload files without the `gdrive_` tools unless you have no intention of using the tools. These functions rely on a strict system that will not work properly for manually uploaded files.
+- Don't try to manually add *version suffixes* to your local_path files names during `gdrive_upload()`. The function will try its best to stop you, since this would severely compromise the ability to track versions! 
+- Even though you now have the `googledrive` package installed, don't load the `library(googledrive)` package in your scripts. Accidentally calling `drive_upload()` or `drive_download()` from the package can potentially *overwrite* files when not desired or create files on the Shared Gdrive with *duplicate names* (why Google allows this is baffling).
+
+
+
+
