@@ -1,5 +1,5 @@
 # Author: Geoff Mayhew
-# Functions for GoogleDriveTest repository. Developing functions for streamlining workflow with Shared Google Drive
+# Functions for GoogleDriveTest repository. Developing functions for streamlining workflow with Shared Google Drive.
 
 # Make sure required packages are installed
 if( !require("data.table", quietly = T) ) install.packages("data.table")
@@ -13,44 +13,6 @@ if( !any(installed.packages()[, 1] == "crayon") ) install.packages("crayon")
 # Same thing with the crayon package, which is useful for the bold() and italic() functions to format text that is sent
 # to print in the console. However, those functions conflict with the highly-used flextable package, so crayon functions
 # will also be called explicity with the package name.
-
-#' FIXME
-#' *I got a warning I shouldn't have* It says the local is behind the gdrive even though they are identical.
-#' gdrive_upload(local_path = your_file_path, gdrive_dribble = gdrive_test_dribble)
-# 1 instance(s) of geoff_mayhew_test.rdata found in the Gdrive.
-# The most recent version is geoff_mayhew_test_v000.rdata, uploaded on 2024-01-19 11:16:26 PST.
-# 
-# Warning: Local file geoff_mayhew_test.rdata is behind the gdrive!
-#   geoff_mayhew_test.rdata is identical to geoff_mayhew_test_v000.rdata. Skipping upload.
-#' *fix compare_local_and_gdrive* : apparently the modified date DOES NOT match the local file's modified date? Not sure why 
-#' I was getting different dates from my previous tests. Lately it's simply matching the Gdrive create date.
-#' *this means that the gdrive modified time will always be LATER than the local modified time!*
-#' # for some reason the drive_reveal()$modifiedTime is the local file's time for my ADP data, but new datasets that I
-#' # am creating have the same modifiedTime as the createdTime!
-#' # I guess this means we can skip using drive_reveal(), and if the gdrive is ahead, always check bytes? What a PITA
-#' *can I force the revision mtime to match the local_mtime?
-#' digging though drive_upload on the repo
-#' `https://github.com/tidyverse/googledrive/blob/main/R/drive_upload.R`*`
-#' I find params[["uploadType]] <- "multipart
-#' `https://developers.google.com/drive/api/guides/manage-uploads`
-#' # this should be the default of my function, so I'm not sure why the metadata is not being sent.
-
-
-#' TODO
-#' *Is the file extension used to make sure we can upload files with the same name but different extensions?*
-
-#' TODO
-#' *Are the file names case-sensitive*?
-
-#' TODO
-#' *Create a single place to save shared_id aliases* (instead of hardcoding in gdrive_dir and gdrive_set_dribble)
-
-#' TODO
-#' *request to delete files* through a function that sends an e-mail to users with delete privileges (cant find such 
-#' users with these privileges through drive_resources in the shared drive).  
-
-#' TODO
-#' basename() and dirname() functions can be simpler than using some of the regexp I employed
 
 #======================================================================================================================#
 # Functions ####
@@ -106,8 +68,6 @@ dir_search <- function(dribble) {
 
 # The function looks up and displays the folder structure of a shared drive. By default, it searches through the FMA 
 # Analytical Services shared drive.
-#' TODO # Automatically omit some folder names from the search, or specify subfolders to focus the search on (e.g., projects
-#' or analyst folders)
 gdrive_dir <- function(shared_id = c("Analytics")) {
   # Search the folder structure of the FMA shared google drive
   
@@ -168,16 +128,20 @@ gdrive_set_dribble <- function(gdrive_path, shared_id = "Analytics"){
     id <- "0AJcHJWlPgKIgUk9PVA"
   }
   
-  # Get the dribble object from the gdrive path. It will contain roww for all enclosed folders and files.
+  # Get the dribble object from the gdrive_path. It will contain roww for all enclosed folders and files.
   dribble_out <- googledrive::drive_get(path = gdrive_path, shared_drive = googledrive::as_id(id))
   
   # Only allow folders to be set as targets (exclude files)
-  dribble_out <- dribble_out[sapply(dribble_out$drive_resource, "[[", "mimeType") == "application/vnd.google-apps.folder", ]
+  dribble_out <- dribble_out[
+    sapply(dribble_out$drive_resource, "[[", "mimeType") == "application/vnd.google-apps.folder", 
+  ]
   if( nrow(dribble_out) == 0 ){
     stop(paste0("Path ", crayon::bold(gdrive_path), " was not found!"))
   } else if( nrow(dribble_out) > 1 ){
     stop({
-      cat(paste0("Path name ", crayon::bold(gdrive_path), " is not specific enough. ", nrow(dribble_out), " matches found.\n"))
+      cat(paste0(
+        "Path name ", crayon::bold(gdrive_path), " is not specific enough. ", nrow(dribble_out), " matches found.\n"
+      ))
     })
   } else if ( nrow(dribble_out) == 1 ){
     dribble_out
@@ -190,12 +154,16 @@ gdrive_set_dribble <- function(gdrive_path, shared_id = "Analytics"){
 # really only for reference, and intentionally does not give results in dribble class.
 gdrive_ls <- function(gdrive_dribble){
 
-  if( !googledrive::is_dribble(gdrive_dribble) | nrow(gdrive_dribble) != 1) stop("'gdrive_dibble' needs to be a nrow = 1 dribble.")
+  if( !googledrive::is_dribble(gdrive_dribble) | nrow(gdrive_dribble) != 1) {
+    stop("'gdrive_dibble' needs to be a nrow = 1 dribble.")
+  }
   
   # Get all items in gdrive_dibble
   dribble_items <- googledrive::drive_ls(gdrive_dribble)
   # Subset to only files
-  dribble_items <- dribble_items[sapply(dribble_items$drive_resource, "[[", "mimeType") != "application/vnd.google-apps.folder"  ,]
+  dribble_items <- dribble_items[
+    sapply(dribble_items$drive_resource, "[[", "mimeType") != "application/vnd.google-apps.folder",
+  ]
   
   if( nrow(dribble_items) == 0 ){
     cat(paste0("No files exist in ", crayon::bold(gdrive_dribble$path), ".\n"))
@@ -212,7 +180,9 @@ gdrive_ls <- function(gdrive_dribble){
       function(x) utils:::format.object_size(x, units = "auto"))
     # Return a data.frame without drive_resources so this object can't be abused as a dribble
     dribble_items$file_name <- dribble_items$name
-    as.data.frame(dribble_items[order(dribble_items$create_date, decreasing = T), c("file_name", "create_date", "size")])
+    as.data.frame(
+      dribble_items[order(dribble_items$create_date, decreasing = T), c("file_name", "create_date", "size")]
+    )
   }
 }
 
@@ -258,15 +228,16 @@ parse_local_path <- function(local_path){
 # A helper function to parse the google drive dribble, using the outputs of parse_local_path() to determine which files
 # to search for.
 parse_dribble <- function(gdrive_dribble, l_path) {
-  # gdrive_dribble <- copy(gdrive_test_dribble); l_path <- parse_local_path(local_path)
-  
+
   # Can the Gdrive folder be found?
   if( !googledrive::is_dribble(gdrive_dribble) ) {
-    stop(paste0("'gdrive_dribble' must be specified as a dribble. Use ", italic("gdrive_set_dribble()"), " to do this."))
+    stop(paste0(
+      "'gdrive_dribble' must be specified as a dribble. Use ", italic("gdrive_set_dribble()"), " to do this."
+    ))
   }
   if( nrow(gdrive_dribble) != 1 ) stop("'gdrive_dribble' must be 1 row.")
   
-  # Identify all folders/files in the gdrive path
+  # Identify all folders/files in the Gdrive path
   gdrive_items <- googledrive::drive_ls(gdrive_dribble)
   
   # If l_path has a version number, find that item specifically, Otherwise, match by name.
@@ -318,8 +289,11 @@ parse_dribble <- function(gdrive_dribble, l_path) {
     warning(paste0("Version numbers and create dates of Gdrive files are not in the same order! Fix this!"))
   }
 
-  # Return dribble of gdrive files and vector of create dates using local timezone
-  list(files = gdrive_file, c_date_og = create_dates, c_date = format(as.POSIXct(create_dates), tz = Sys.timezone(), usetz = T))
+  # Return dribble of Gdrive files and vector of create dates using local timezone
+  list(
+    files = gdrive_file, c_date_og = create_dates, 
+    c_date = format(as.POSIXct(create_dates), tz = Sys.timezone(), usetz = T)
+  )
 }
 
 #======================================================================================================================#
@@ -331,10 +305,12 @@ compare_local_and_gdrive <- function(l_path, g_path){
   # Get information of local file
   local_info <- file.info(l_path$path)
   
-  # Get extended information from the target files on the gdrive This retrieves the 'modified time' of the local file 
-  # when it was uploaded (not the modified time of the object in the gdrive, which may be affected by things like file 
-  # name changes)
-  # drive_reveal() does take a little bit of time to run bit its MUCH faster than running drive_read_raw on large files
+  #' Get extended information from the target files on the Gdrive. This retrieves the 'modified time' of the local file 
+  #' when it was uploaded (not the modified time of the object in the gdrive, which may be affected by things like file 
+  #' name changes)
+  #' drive_reveal() does take a little bit of time to run but is MUCH faster than running drive_read_raw on large files.
+  #' It is also useful because this version of modifiedTime does not change if someone were to edit the file in any way, 
+  #' including renaming it to something else and back.  
   drive_rev_info <- googledrive::drive_reveal(g_path$files, what = "published")$revision_resource
   drive_mtime <- as.POSIXct(sapply(
     sapply(drive_rev_info, "[[", "modifiedTime"),
@@ -342,12 +318,12 @@ compare_local_and_gdrive <- function(l_path, g_path){
   
   # Get the differences in modified time
   mtime_diff <- sapply(drive_mtime, function(x) difftime(local_info$mtime, x, units = "secs"))
-  # Indicate relative recency of modify dates of local versus gdrive files
+  # Indicate relative recency of modify dates of local versus Gdrive files
   mtime_diff_sign <- sign(ifelse(abs(mtime_diff) < 1, 0, mtime_diff))
   # If difftime is less than 1 second, assume the modified times are the same
   mtime_same <- abs(mtime_diff) < 1
   
-  # Get the size in bytes of the gdrive files
+  # Get the size in bytes of the Gdrive files
   drive_bytes <- as.numeric(sapply(drive_rev_info, "[[", "size"))
   bytes_same <- local_info$size == drive_bytes
   
@@ -357,7 +333,7 @@ compare_local_and_gdrive <- function(l_path, g_path){
   # If more than one file matches perfectly, we've allowed duplicates on the gdrive. This should never happen!
   if( length(which(mtime_same)) > 1 ){
     # If more than one file has the same modify time and size, probably need to delete one!
-    warning("Somehow multiple gdrive files have the same modified time as the local file. Aborting!")
+    warning("Somehow multiple Gdrive files have the same modified time as the local file. Aborting!")
     print(paste("Local file modified time: ", local_info$mtime))
     print(data.frame(file = g_path$files$name, drive_mtime = drive_mtime))
     return(list(local_mtime = local_info$mtime, data.frame(file = g_path$files$name, drive_mtime = drive_mtime)))
@@ -365,7 +341,7 @@ compare_local_and_gdrive <- function(l_path, g_path){
   
   # If the local file is more recent, test to see if the data actually differs from the most recent Gdrive version.
   if( mtime_diff_sign[1] == 1 ){
-    # If the number of bytes is the same, proceed to reading bytes. Reading bytes for gdrive files might take a few 
+    # If the number of bytes is the same, proceed to reading bytes. Reading bytes for Gdrive files might take a few 
     # seconds for a 250Mb file, but it otherwise pretty quick.
     if( bytes_same[1] ){
       # If the files are identical, flip the files_same flag
@@ -413,7 +389,7 @@ compare_local_and_gdrive <- function(l_path, g_path){
 # Uploads files to the specified directory in the shared Gdrive.
 gdrive_upload <- function(local_path, gdrive_dribble) {
   # 'local_path' is the path to the local file and must include the file extension.
-  # 'path' is the dribble of the gdrive where you want to upload the file to.
+  # 'path' is the dribble of the Gdrive where you want to upload the file to.
 
   # Parse the local path to get the directory, file name, extension, and whether a version flag exists
   l_path <- parse_local_path(local_path)
@@ -447,16 +423,16 @@ gdrive_upload <- function(local_path, gdrive_dribble) {
     # Grab the most recent version
     most_recent <- g_path$files[1, ]
     
-    # Print the count of instances of their object in the gdrive folder
+    # Print the count of instances of their object in the Gdrive folder
     cat(paste0(nrow(g_path$files), " instance(s) of ", crayon::bold(l_path$name), " found in the Gdrive.\n"))
     cat(paste0("The most recent version is ", crayon::bold(most_recent$name), ", uploaded on ", g_path$c_date[1], ".\n\n" ))
 
-    # Compare the local file with gdrive versions 
+    # Compare the local file with Gdrive versions 
     local_check <- compare_local_and_gdrive(l_path, g_path)
     
     # Skip the upload if the local is up to date or behind the gdrive
     if( local_check$local_up_to_date | local_check$local_minus_gdrive_mtime == -1 ){
-      # If the gdrive is already up to date or ahead of the local, cancel the upload
+      # If the Gdrive is already up to date or ahead of the local, cancel the upload
       return(cat(paste0(
         crayon::bold(l_path$name), " is identical to ", crayon::bold(most_recent$name), ". Skipping upload.\n"
       )))
@@ -476,9 +452,17 @@ gdrive_upload <- function(local_path, gdrive_dribble) {
     message = "Proceed with upload? (Y/N)"
   )
   if( upload_response == "Y"){
-    googledrive::drive_upload(media = local_path, path = gdrive_dribble, name = gdrive_file_name, overwrite = FALSE)
+    # Upload the file. Make the modifiedTime match that of the local file
+    # Get the modify time of the local file
+    local_mtime <- file.info(local_path)$mtime
+    # convert this to the format Google wants
+    new_mtime <- paste0(sub("(?<=[0-9])( )(?=[0-9])", "T", format(local_mtime, tz = "GMT"), perl = T), ".000Z")
+    googledrive::drive_upload(
+      media = local_path, path = gdrive_dribble, name = gdrive_file_name, overwrite = FALSE,
+      modifiedTime = new_mtime
+    )
   } else if ( upload_response == "N"){
-    stop("Upload to Gdrive aborted.")
+    message("Upload to Gdrive aborted.")
   } else {
     stop("Response was not either 'Y' or 'N'. Aborting upload.")
   }
@@ -520,7 +504,7 @@ gdrive_download <- function(local_path, gdrive_dribble) {
         return(cat(paste0(crayon::bold(l_path$name), " is up-to-date with Gdrive. Skipping download.\n")))
       } else if (  local_check$local_minus_gdrive_mtime == 1 ){
         # If the local is ahead
-        return(cat(paste0("Skipping download, but consider if you need up update the gdrive with ", italic("gdrive_upload()", ".\n"))))
+        return(cat(paste0("Skipping download, but consider if you need up update the Gdrive with ", italic("gdrive_upload()", ".\n"))))
       } else if ( local_check$local_minus_gdrive_mtime == -1 ){
         # If the local is behind, prompt the download and overwrite
         cat(paste0("Local version of ", crayon::bold(l_path$name), " is ", red("out of date"), " with the Gdrive!\n"))
@@ -541,6 +525,13 @@ gdrive_download <- function(local_path, gdrive_dribble) {
     }
   } else{
     # If no local exists, simply download the file
-    googledrive::drive_download(file = g_path$files, path = local_path, overwrite = F)
+    # Download the file
+    if( l_path$ver_flag ){
+      # If a version suffix exists, download that specific file version.
+      googledrive::drive_download(file = g_path$files, path = local_path, overwrite = F)
+    } else {
+      # If no version suffix exists, download the most recent version.
+      googledrive::drive_download(file = g_path$files[1,], path = local_path, overwrite = F)
+    }
   }
 }
