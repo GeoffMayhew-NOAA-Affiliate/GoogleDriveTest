@@ -312,9 +312,7 @@ compare_local_and_gdrive <- function(l_path, g_path){
   #' It is also useful because this version of modifiedTime does not change if someone were to edit the file in any way, 
   #' including renaming it to something else and back.  
   drive_rev_info <- googledrive::drive_reveal(g_path$files, what = "published")$revision_resource
-  drive_mtime <- as.POSIXct(sapply(
-    sapply(drive_rev_info, "[[", "modifiedTime"),
-    function(x) as.POSIXct(x, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "GMT"), USE.NAMES = F))
+  drive_mtime <- as.POSIXct(sapply(drive_rev_info, "[[", "modifiedTime"))
   
   # Get the differences in modified time
   mtime_diff <- sapply(drive_mtime, function(x) difftime(local_info$mtime, x, units = "secs"))
