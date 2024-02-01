@@ -265,7 +265,7 @@ To simulate this, **navigate to and delete** your `r your_file_path` file! Then,
 gdrive_download(local_path = your_file_path, gdrive_dribble = gdrive_test_dribble)
 ```
 
-Note that the most recent version of the file was automatically downloaded from the Gdrive! Even though all Gdrive files have a *version suffix*, because your `local_path` does not have a version suffix, this asks `gdrive_download()` to fetch the most recent version, strip out the version suffix from the naame, and saves it locally. Remember, locally, data files with names without version suffixes are intended to be kept up-to-date with the Gdrive.
+Note that the most recent version of the file was automatically downloaded from the Gdrive! Even though all Gdrive files have a *version suffix*, because your `local_path` does not have a version suffix, this asks `gdrive_download()` to fetch the most recent version, strip out the version suffix from the name, and saves it locally. Remember, locally, data files with names without version suffixes are intended to be kept up-to-date with the Gdrive.
 
 By including the call to `gdrive_download()` in your script, you not only make it explicit to yourself and the team where the data lives on the Gdrive and where it should live locally, but by regularly running this code, everyone on the team can keep their local up-to-date whenever newer versions of the data file are uploaded. 
 
@@ -292,13 +292,13 @@ You should now see the _v000 version of your data file saved locally in your `Da
 
 ---
 
-## Example scripts
+## Example scripts (not to be run - just examples)
 
 Now that the uses of each function are understood, take a look at the following examples to see how these functions might be used in diffrent contexts.
 
 ### Data Pull Script
 
-Our projects often require is to pull data from a database. It is a good idea to save the data from these raw data pulls and upload them to the Gdrive as these databases are constantly updated. Here is what a script that prepares raw data might look like.
+Our projects often require us to pull data from a database. It is a good idea to save the data from these raw data pulls and upload them to the Gdrive as these databases are constantly updated. Here is what a script that prepares raw data might look like.
 
 ```{r example_raw, eval = F}
 #' [Example: Data Pull Script]

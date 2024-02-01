@@ -314,7 +314,7 @@ compare_local_and_gdrive <- function(l_path, g_path){
   drive_rev_info <- googledrive::drive_reveal(g_path$files, what = "published")$revision_resource
   drive_mtime <- as.POSIXct(sapply(
     sapply(drive_rev_info, "[[", "modifiedTime"),
-    function(x) as.POSIXct(x, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "GMT"), USE.NAMES = F))
+    function(x) as.POSIXct(x, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "GMT"), USE.NAMES = F), origin = "1970-01-01")
   
   # Get the differences in modified time
   mtime_diff <- sapply(drive_mtime, function(x) difftime(local_info$mtime, x, units = "secs"))
