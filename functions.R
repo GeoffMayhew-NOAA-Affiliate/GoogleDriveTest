@@ -2,7 +2,8 @@
 # Functions for GoogleDriveTest repository. Developing functions for streamlining workflow with Shared Google Drive.
 
 # Make sure required packages are installed
-if( !require("data.table", quietly = T) ) install.packages("data.table")
+if( !require("data.table", quietly = T) ) install.packages("data.table")   #' TODO *Remove dependency on data.table!*
+
 if( !require("rstudioapi", quietly = T) ) install.packages("rstudioapi")
 if( !any(installed.packages()[, 1] == "googledrive") ) install.packages("googledrive")
 # We want to make sure googledrive package is installed, but not necessarily loaded. Ideally, we will call googledrive::
@@ -386,7 +387,7 @@ compare_local_and_gdrive <- function(l_path, g_path){
 
 #======================================================================================================================#
 
-# Uploads files to the specified directory in the shared Gdrive.
+#' *Uploads files to the specified directory in the shared Gdrive.*
 gdrive_upload <- function(local_path, gdrive_dribble) {
   # 'local_path' is the path to the local file and must include the file extension.
   # 'path' is the dribble of the Gdrive where you want to upload the file to.
@@ -394,144 +395,208 @@ gdrive_upload <- function(local_path, gdrive_dribble) {
   # Parse the local path to get the directory, file name, extension, and whether a version flag exists
   l_path <- parse_local_path(local_path)
   # If the local path doesn't exist, abort!
-  if( !l_path$local_exists ) stop(paste0(crayon::bold(local_path), " cannot be found."))
-  
+  if( !l_path$local_exists ) stop(paste0(crayon::cyan(local_path), " cannot be found."))
   # Prevent uploading files with a version suffix.
   if( l_path$ver_flag ) stop("Do not upload files with a version suffix!")
-  
   # Parse the path to the google drive, looking for the files specified in local_path
   g_path <- parse_dribble(gdrive_dribble, l_path)
   
-  # If other version of this file already exist on the drive...
-  if( nrow(g_path$files) > 0  ) {
+  # Get the modify time of the local file
+  local_mtime <- file.info(local_path)$mtime
+  # convert this to the format Google wants
+  new_mtime <- paste0(sub("(?<=[0-9])( )(?=[0-9])", "T", format(local_mtime, tz = "GMT"), perl = T), ".000Z")
+  
+  # Either upload or update the file
+  if( nrow(g_path$gdrive_item) == 0 ) {
+    #' *Upload File - If the file does not yet exist on the gdrive, upload the file to the gdrive*
+    cat(paste0(
+      crayon::cyan(local_path), " will be uploaded to ", crayon::yellow(gdrive_dribble$path),
+      " as ", crayon::yellow("[ver1]"), ".\n"
+    ))
+    upload_response <- toupper(rstudioapi::showPrompt(
+      title = "Notice!",
+      message = "Proceed with upload? (Y/N)"
+    ))
+    if( is.null(upload_response) ) {
+      stop("Aborting upload.")
+    } else if( upload_response == "Y" ){
+      # Upload the file. Make the modifiedTime match that of the local file
+      googledrive::drive_upload(
+        media = local_path, path = gdrive_dribble, overwrite = FALSE, 
+        modifiedTime = new_mtime, keepRevisionForever = TRUE
+      )
+    } else if ( upload_response == "N" ){
+      return("Aborting upload.")
+    } else {
+      stop("Aborting upload. Response was not either 'Y' or 'N'.")
+    }
+  } else {
+    #' *Update File - If the file already exists on the gdrive, and the local is ahead, update the file*
     
-    # Determine the next version number as the next number after the most recent version
-    # Remove the file name, "_v", and the extension to get left with the version number
-    next_v <- paste0("_v", formatC(as.integer(sub(
-      paste0(l_path$name_no_ext, "_v"),
-      replace = "", 
-      sub(paste0(l_path$extension, "$"), "", g_path$files$name[1])
-    )) + 1, digits = 0, width = 3, flag = "0"))
-    # Or match it with a lookbehind for "_v" an a lookahead for the extension
-    # next_v <- paste0("_v", formatC(as.integer(regmatches(
-    #   g_path$files$name[1],
-    #   regexpr(paste0("(?<=_v)([0-9]{3})", "(?=", l_path$extension, ")"), g_path$files$name[1], perl = T)
-    # )) + 1, digits = 0, width = 3, flag = "0"))
+    # Compare the file sizes and modified dates of the local file and the head gdrive file
+    compare_res <- compare_local_and_gdrive2(l_path, g_path)
     
-    gdrive_file_name <- paste0(l_path$name_no_ext, next_v, l_path$extension)
-    
-    # Grab the most recent version
-    most_recent <- g_path$files[1, ]
-    
-    # Print the count of instances of their object in the Gdrive folder
-    cat(paste0(nrow(g_path$files), " instance(s) of ", crayon::bold(l_path$name), " found in the Gdrive.\n"))
-    cat(paste0("The most recent version is ", crayon::bold(most_recent$name), ", uploaded on ", g_path$c_date[1], ".\n\n" ))
-
-    # Compare the local file with Gdrive versions 
-    local_check <- compare_local_and_gdrive(l_path, g_path)
-    
-    # Skip the upload if the local is up to date or behind the gdrive
-    if( local_check$local_up_to_date | local_check$local_minus_gdrive_mtime == -1 ){
-      # If the Gdrive is already up to date or ahead of the local, cancel the upload
+    # Decide whether to update the existing file
+    if( compare_res$identical ) {
+      #' *If the files are identical, don't bother updating!*
       return(cat(paste0(
-        crayon::bold(l_path$name), " is identical to ", crayon::bold(most_recent$name), ". Skipping upload.\n"
+        "Local is ", crayon::bold(compare_res$local_status), " the Gdrive. Skipping upload.\n"
       )))
-    }  
-  } else {
-    # If this name does not exist, assign it a version number starting with _v000
-    gdrive_file_name <- paste0(l_path$name_no_ext, "_v000", l_path$extension)
-  }
-
-  # Confirm name and location of upload
-  cat(paste0(
-    crayon::bold(local_path), " will be uploaded as ", crayon::bold(gdrive_file_name), 
-    " to ", crayon::bold(gdrive_dribble$name), ".\n"
-  ))
-  upload_response <- rstudioapi::showPrompt(
-    title = "Notice!",
-    message = "Proceed with upload? (Y/N)"
-  )
-  if( upload_response == "Y"){
-    # Upload the file. Make the modifiedTime match that of the local file
-    # Get the modify time of the local file
-    local_mtime <- file.info(local_path)$mtime
-    # convert this to the format Google wants
-    new_mtime <- paste0(sub("(?<=[0-9])( )(?=[0-9])", "T", format(local_mtime, tz = "GMT"), perl = T), ".000Z")
-    googledrive::drive_upload(
-      media = local_path, path = gdrive_dribble, name = gdrive_file_name, overwrite = FALSE,
-      modifiedTime = new_mtime
-    )
-  } else if ( upload_response == "N"){
-    message("Upload to Gdrive aborted.")
-  } else {
-    stop("Response was not either 'Y' or 'N'. Aborting upload.")
+    } else {
+      
+      if( compare_res$local_status == "behind" ){
+        #' * If local is behind, prompt the user to check before proceeding*
+        local_behind_response <- toupper(rstudioapi::showPrompt(
+          title = "Notice!",
+          message = paste0(
+            "Local copy of ", l_path$name, 
+            " appears to be behind the Gdrive. Are you sure you want to continue with the upload? (Y/N)"
+          )
+        ))
+        if( is.null(local_behind_response) ){
+          return("Aborting upload.")
+        } else if( local_behind_response == "N" ){
+          return("Aborting upload.")
+        } else if( local_behind_response != "Y" ){
+          return("Response was not 'N' or 'Y'. Aborting upload.")
+        }
+      } 
+      
+      # Prepare to update
+      cat(paste0(
+        crayon::bold(l_path$name), " in ", crayon::yellow(gdrive_dribble$path), " will be updated to ", 
+        crayon::yellow(paste0("[ver", g_path$current_ver + 1,  "]")), ".\n"
+      ))
+      update_response <- toupper(rstudioapi::showPrompt(
+        title = "Notice!",
+        message = "Proceed with upload? (Y/N)"
+      ))
+      if( is.null(update_response) ){
+        stop("Aborting upload")
+      } else if ( update_response == "N"){
+        stop("Aborting upload.")
+      } else if ( update_response != "Y") {
+        stop("Aborting upload. Response was not either 'Y' or 'N'.")
+      } else if( update_response == "Y" ){
+        # Perform the update, assigning the modified time of the file
+        googledrive::drive_update(
+          file = g_path$gdrive_item, media = local_path, modifiedTime = new_mtime, keepRevisionForever = TRUE
+        )
+      }
+    }
   }
 }
 
 #======================================================================================================================#
 
-# Downloads files to the specified directory in the shared Gdrive. Checks to make sure that the local data file exists
-# and is up-to-date with the Gdrive, and otherwise skips the download.
-gdrive_download <- function(local_path, gdrive_dribble) {
+#' *Downloads files to the specified directory in the shared Gdrive.* 
+#' Checks to make sure that the local data file exists and is up-to-date with the Gdrive, and otherwise skips the 
+#' download. Be default (when ver = NULL), downloads the most recent version. If `ver` is a length 1 numeric, it will
+#' download a new instance of the file with a version suffix (e.g, _v000) added to the file name.
+gdrive_download <- function(local_path, gdrive_dribble, ver = NULL) {
   # `local_path` is the local path to where you want to save the file and contains the name of the file.
   # `gdrive_dribble` is the dribble of the folder containing the file you want to pull
+  
+  # Make sure ver, if specified, is numeric
+  if( !is.null(ver) ) if ( !is.numeric(ver) ) stop("Version number 'ver' needs to be numeric!")
   
   # Parse the local path to determine whether the file exists locally and what to search for on the Gdrive.
   l_path <- parse_local_path(local_path)
   # Parse the Gdrive path, using l_path to determine what to search for in the Gdrive.
   g_path <- parse_dribble(gdrive_dribble, l_path)
   
-  # Input checks
   # Can the directory in local_path be found?
   if( !file_test(op = "-d",  l_path$directory) ) {
     stop(paste0("Local path, ", crayon::bold(l_path$directory), ", not found."))} 
-
-  # Vary the action depending on if a local version of the file exists and if the target is a specific version.
-  if( l_path$local_exists ){
-    # If a local exists, compare it with the version(s) on the gdrive.
-    local_check <- compare_local_and_gdrive(l_path, g_path)
-    
-    if( l_path$ver_flag ){
-      # If downloading a specific version, make sure it matches
-      if( local_check$local_up_to_date ){
-        return(cat(paste0(crayon::bold(l_path$name), " found locally. Skipping download.\n")))
-      } else {
-        stop(paste0("Somehow the local version of ", l_path$name, "differs from the gdrive's. Fix this!"))
-      }
-    } else {
-      # If trying to stay up-to-date
-      if( local_check$local_up_to_date ){
-        return(cat(paste0(crayon::bold(l_path$name), " is up-to-date with Gdrive. Skipping download.\n")))
-      } else if (  local_check$local_minus_gdrive_mtime == 1 ){
-        # If the local is ahead
-        return(cat(paste0("Skipping download, but consider if you need up update the Gdrive with ", italic("gdrive_upload()", ".\n"))))
-      } else if ( local_check$local_minus_gdrive_mtime == -1 ){
-        # If the local is behind, prompt the download and overwrite
-        cat(paste0("Local version of ", crayon::bold(l_path$name), " is ", red("out of date"), " with the Gdrive!\n"))
-        if( any(local_check$local_match_gdrive_vec) ){
-          cat(paste0(
-            "Most recent version is ", crayon::bold(g_path$files[1, ]$name), " but your local matches ", 
-            crayon::bold(g_path$files[local_check$local_match_gdrive_vec ,]$name), ".\n" ))
-        }
-        download_response <- rstudioapi::showPrompt(
+  
+  if( is.null(ver) ){
+    #' *Downloading the most recent version*
+    if( l_path$local_exists ){
+      # If a local version already exists, compare it with the gdrive version
+      compare_res <- compare_local_and_gdrive2(l_path, g_path)
+      
+      if( compare_res$local_status %in% c("up to date with", "ahead of") ){
+        #' *If the local is ahead or up to date, skip the download*
+        
+        return(cat(paste0(
+          "Local copy of ", crayon::bold(l_path$name), " is ", crayon::green(compare_res$local_status), 
+          " the Gdrive. Skipping download.\n"
+        )))
+      } else if( compare_res$local_status == "behind" ){
+        #' *If the local is behind, prompt to download and overwrite to bring the local version up to date*
+        cat(paste0("Local version of ", crayon::bold(l_path$name), " is ", crayon::red(compare_res$local_status), " the Gdrive!\n"))
+        download_response <- toupper(rstudioapi::showPrompt(
           title = "Notice!", 
-          message = paste0("Overwrite and update your local version of ", l_path$name, "? (Y/N)"))
-        if( toupper(download_response) == "Y" ) {
-          googledrive::drive_download(file = g_path$files[1,], path = local_path, overwrite = T)
-        } else if( toupper(download_response) == "N") {
-          return(cat(paste0("Download of ", crayon::bold(g_path$files[1, ]$name), " aborted.")))
-        } else stop("You didnt enter Y or N!")
+          message = paste0(
+            "Overwrite and update your local version of ", l_path$name, " to ", "[ver",
+            g_path$revision_lst[[1]]$version, "]", "? (Y/N)"
+          )
+        ))
+        if( is.null(download_response) ){
+          return(cat(paste0("Aborting download of ", crayon::bold(l_path$name), ".")))
+        } else if( toupper(download_response) == "N" ) {
+          return(cat(paste0("Aborting download of ", crayon::bold(l_path$name), ".")))
+        } else if ( toupper(download_response) != "Y") {
+          stop("You didnt enter `Y` or `N`! Aborting download.")
+        }
       }
-    }
-  } else{
-    # If no local exists, simply download the file
-    # Download the file
-    if( l_path$ver_flag ){
-      # If a version suffix exists, download that specific file version.
-      googledrive::drive_download(file = g_path$files, path = local_path, overwrite = F)
     } else {
-      # If no version suffix exists, download the most recent version.
-      googledrive::drive_download(file = g_path$files[1,], path = local_path, overwrite = F)
+      #' *If a local version does not exist*
+      cat(paste0(
+        "No local copy of ", crayon::bold(l_path$name), " found. Downloading the most recent version: ", 
+        crayon::yellow(paste0("[ver", g_path$current_ver, "]")), ".\n"
+      ))
+      download_message <- paste0(
+        "Overwrite and update your local version of ", l_path$name, " to ", "[ver", 
+        g_path$current_ver, "]", "? (Y/N)"
+      )
+    }
+    #' *Download the most recent version and set the modified time.*
+    googledrive::drive_download(file = g_path$gdrive_item, path = local_path, overwrite = T)
+    Sys.setFileTime(local_path, g_path$revision_lst[[g_path$current_ver]]$modifiedTime)
+    
+  } else {
+    #' *Downloading a prior version*
+    
+    # check to see if the file already exists
+    ver_path <- paste0(
+      l_path$directory, l_path$name_no_ext, "_v", formatC(ver, width = 3, digits = 0, flag = "0" ), l_path$extension 
+    )
+    
+    if( !file_test(op = "-f", ver_path) ){
+      #' *If the file doesn't exist, download it*
+      
+      # Grab the desired version
+      if( !(ver %in% seq_along(g_path$revision_lst)) ){
+        stop(cat(paste0(
+          "No ", crayon::yellow(paste0("[ver", ver, "]")), " of ", crayon::bold(l_path$name), 
+          " exists! Currently on ", crayon::yellow(paste0("[ver", g_path$current_ver, "]")), ". Aborting download.\n"
+        )))
+      } else {
+        
+        # Subset the revision list to the desired revision
+        revision_i <- g_path$revision_lst[[ver]]
+        
+        # If the version is found, download it as raw bytes
+        revision_raw <- gargle::request_make(gargle::request_build(
+          method = "GET",
+          path = "drive/v3/files/{fileId}",  
+          params = list(
+            fileId = g_path$gdrive_item$id, revisionId = revision_i$id, supportsAllDrives = TRUE, alt = "media"
+          ),
+          token = googledrive::drive_token()
+        ))
+        # Write the file the local path and set its modified date
+        cat(paste0(
+          "Downloading ", crayon::yellow(paste0(l_path$name, " [ver", ver, "]")), " as ", crayon::cyan(ver_path), ".\n"
+        ))
+        writeBin(revision_raw$content, con = ver_path)
+        Sys.setFileTime(ver_path, revision_i$modifiedTime)
+      }
+    } else {
+      #' *If the file already exists, skip the download*
+      #' TODO `Could also check to make sure that the local version and the gdrive version matches? Perhaps overkill?`
+      return(cat(paste0(crayon::cyan(ver_path), " already exists locally. Skipping download.\n")))
     }
   }
 }
