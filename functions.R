@@ -535,3 +535,8 @@ gdrive_download <- function(local_path, gdrive_dribble) {
     }
   }
 }
+
+#======================================================================================================================#
+
+#' *View the revision history of a file on the Gdrive*
+gdrive_versions("new_data_test2.rdata", v2_dribble)
