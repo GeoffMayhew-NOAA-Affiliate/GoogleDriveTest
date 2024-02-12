@@ -299,89 +299,75 @@ parse_dribble <- function(gdrive_dribble, l_path) {
 
 #======================================================================================================================#
 
-# A helper function that compares the local file with its versions on the gdrive (modify date, byte length, bytes)
+#' *A helper function that compares the local file with its versions on the gdrive*
 compare_local_and_gdrive <- function(l_path, g_path){
   # local_path is length 1, but target can be an nrow()>1 dribble of files
   
   # Get information of local file
   local_info <- file.info(l_path$path)
   
-  #' Get extended information from the target files on the Gdrive. This retrieves the 'modified time' of the local file 
-  #' when it was uploaded (not the modified time of the object in the gdrive, which may be affected by things like file 
-  #' name changes)
-  #' drive_reveal() does take a little bit of time to run but is MUCH faster than running drive_read_raw on large files.
-  #' It is also useful because this version of modifiedTime does not change if someone were to edit the file in any way, 
-  #' including renaming it to something else and back.  
-  drive_rev_info <- googledrive::drive_reveal(g_path$files, what = "published")$revision_resource
-  drive_mtime <- as.POSIXct(sapply(
-    sapply(drive_rev_info, "[[", "modifiedTime"),
-    function(x) as.POSIXct(x, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "GMT"), USE.NAMES = F), origin = "1970-01-01")
+  # Get the most recent gdrive version
+  gdrive_head <- g_path$revision_lst[[g_path$current_ver]]
+  # compare file size
+  size_match <- gdrive_head$size == file.size(l_path$path)
+  # compare modified time (gdrive - local)
+  mtime_match <- (gdrive_head$modifiedTime - trunc(local_info$mtime))
   
-  # Get the differences in modified time
-  mtime_diff <- sapply(drive_mtime, function(x) difftime(local_info$mtime, x, units = "secs"))
-  # Indicate relative recency of modify dates of local versus Gdrive files
-  mtime_diff_sign <- sign(ifelse(abs(mtime_diff) < 1, 0, mtime_diff))
-  # If difftime is less than 1 second, assume the modified times are the same
-  mtime_same <- abs(mtime_diff) < 1
-  
-  # Get the size in bytes of the Gdrive files
-  drive_bytes <- as.numeric(sapply(drive_rev_info, "[[", "size"))
-  bytes_same <- local_info$size == drive_bytes
-  
-  # Test to see which files are identical in size and modified time
-  files_same <- mtime_same & bytes_same
-  
-  # If more than one file matches perfectly, we've allowed duplicates on the gdrive. This should never happen!
-  if( length(which(mtime_same)) > 1 ){
-    # If more than one file has the same modify time and size, probably need to delete one!
-    warning("Somehow multiple Gdrive files have the same modified time as the local file. Aborting!")
-    print(paste("Local file modified time: ", local_info$mtime))
-    print(data.frame(file = g_path$files$name, drive_mtime = drive_mtime))
-    return(list(local_mtime = local_info$mtime, data.frame(file = g_path$files$name, drive_mtime = drive_mtime)))
-  } 
-  
-  # If the local file is more recent, test to see if the data actually differs from the most recent Gdrive version.
-  if( mtime_diff_sign[1] == 1 ){
-    # If the number of bytes is the same, proceed to reading bytes. Reading bytes for Gdrive files might take a few 
-    # seconds for a 250Mb file, but it otherwise pretty quick.
-    if( bytes_same[1] ){
-      # If the files are identical, flip the files_same flag
-      files_same[1] <- identical(
-        # Local file
-        readBin(l_path$path, what = "raw", n = local_info$size), 
-        # Gdrive file
-        googledrive::drive_read_raw(g_path$files[1,])
-      )
-      cat(paste0(
-        "Local file ", crayon::bold(l_path$name), " is identical ", crayon::bold(g_path$files[1,]$name), 
-        " although it was modified recently.\n"
-      ))
-    } 
-  }
-  
-  # Print messages
-  # If the local is up to date, proceed
-  if( files_same[1] == TRUE ){
-    # If local is up-to-date, no message is needed.
-  } else if( mtime_diff_sign[1] == -1 ){
-    # If the local is behind the gdrive, give a warning
-    warning(paste0("Local file ", crayon::bold(l_path$name), " is ", crayon::bold("behind"), " the gdrive!\n"))
-    # If the local matches an older version, print it.
-    if( any(files_same) ){
-      cat(paste0(
-        "Local file ", l_path$name, " seems to match ", crayon::bold(g_path$files$name[files_same]), "(",  drive_mtime[files_same], ") but ", 
-        crayon::bold(g_path$files$name[1]), " (", drive_mtime[1], ") is the most recent version.\n"))
+  # Compare files
+  if( size_match & mtime_match == 0 ){
+    #' *If modified times and byte lengths are the same, treat them as identical*
+    identical <- T
+    local_status <- "up to date with"
+    gdrive_raw <- NULL
+  } else if( size_match ){
+    # If the sizes match, compare the bytes. This may be time consuming for large files.
+    local_raw <- readBin(l_path$path, what = "raw", n = local_info$size)
+    gdrive_raw <- gargle::request_make(gargle::request_build(
+      method = "GET",
+      path = "drive/v3/files/{fileId}",  
+      params = list(
+        fileId = g_path$gdrive_item$id, revisionId = gdrive_head$id, supportsAllDrives = TRUE, alt = "media"
+      ),
+      token = googledrive::drive_token()
+    ))
+    
+    # If the bytes are the same, we know the files are identical
+    if( all(gdrive_raw$content == local_raw) ) {
+      identical <- T
+      local_status <- "up to date with"
     }
-  } else if( mtime_diff_sign[1] == 1 ){
-    # If the local is ahead of the gdrive
-    cat(paste0("Local file ", l_path$name, " is ", crayon::bold("ahead"), " of the gdrive.\n"))
+  } else {
+    #' *If the files aren't identical, declare whether the local or the gdrive is ahead*
+    identical <- F
+    local_status <- ifelse(mtime_match > 0, "behind", "ahead of")
+    gdrive_raw <- NULL
+    
+    if( local_status == "behind" ){
+      #' *If the local is behind, check to see if the local_mtime matches any prior gdrive versions*
+      local_match_ver <- (sapply(g_path$revision_lst, "[[", "modifiedTime") == trunc(local_info$mtime))
+      # If there is a match, print the version
+      if( any(local_match_ver) ){
+        cat(paste0(
+          "Local copy of ", crayon::bold(l_path$name), " appears to be on ", 
+          crayon::yellow(paste0("[ver", which(local_match_ver), "]")), 
+          " whereas the Gdrive is on ", crayon::yellow(paste0("[ver", g_path$current_ver, "]")), ".\n"
+        ))
+      }
+    }
+    
+    # Print the modified dates of the local and gdrive versions
+    cat(paste0(
+      "Modified datetimes of ", crayon::bold(l_path$name), ":\n- Local:  ", round(local_info$mtime),
+      "\n- Gdrive: ", gdrive_head$modifiedTime, "\n"
+    ))
   }
   
   # Outputs
   list(
-    local_up_to_date = files_same[1],
-    local_minus_gdrive_mtime = mtime_diff_sign[1],
-    local_match_gdrive_vec = files_same
+    identical = identical,
+    mtime_match = mtime_match,
+    local_status = local_status,
+    gdrive_bytes = gdrive_raw$content
   )
 }
 
