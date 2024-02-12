@@ -19,13 +19,13 @@ if( !any(installed.packages()[, 1] == "crayon") ) install.packages("crayon")
 # Functions ####
 #======================================================================================================================#
 
-# This is a helper function for gdrive_dir() that checks for subfolders within folders
+#' *A helper function for gdrive_dir() that checks for subfolders within folders*
 dir_search <- function(dribble) {
   
   dribble_lst <- vector(mode = "list", length = nrow(dribble))
   
   # Keep all parent folders
-  parent <- copy(dribble)
+  parent <- dribble
   # Initialize count of files
   parent$files <- 0
   
@@ -40,16 +40,19 @@ dir_search <- function(dribble) {
       )
     } else {
 
-      x1 <- as.data.table(drive_items)
+      x1 <- drive_items
       # check which items are folders
-      x1_check <- sapply(x1$drive_resource, function(x) x$mimeType %like% ".folder")
+      x1_check <- sapply(x1$drive_resource, function(x) x$mimeType == "application/vnd.google-apps.folder")
       parent[i,]$files <- sum(!x1_check)
       
       # Make new child folder names and their ids
-      child <- x1[x1_check]
-      for(j in 1:nrow(child)) {
-        child[j, "name"] <- paste0(parent[i, ]$name, "/", child[j, ]$name)
-      }
+      child <- x1[x1_check, ]
+      
+      if( nrow(child) != 0 ){
+        for(j in 1:nrow(child)) {
+          child[j, "name"] <- paste0(parent[i, ]$name, "/", child[j, ]$name)
+        }
+      } 
       
       dribble_lst[[i]] <- list(
         parent = parent[i,],
@@ -67,8 +70,8 @@ dir_search <- function(dribble) {
 
 #======================================================================================================================#
 
-# The function looks up and displays the folder structure of a shared drive. By default, it searches through the FMA 
-# Analytical Services shared drive.
+#' *Looks up and display the folder structure of a shared drive.* By default, it searches through the FMA Analytical 
+#' Services shared drive. Somewhat slow because it makes a separate call to check each folder.
 gdrive_dir <- function(shared_id = c("Analytics")) {
   # Search the folder structure of the FMA shared google drive
   
@@ -81,7 +84,7 @@ gdrive_dir <- function(shared_id = c("Analytics")) {
   
   # Get the dribble of the shared drive
   gdrive_dribble <- googledrive::shared_drive_get(id = id)
-  parent <- copy(gdrive_dribble)
+  parent <- gdrive_dribble
   parent_search <- dir_search(parent)
   
   #while( !is.null(parent_search$child) ) {
@@ -104,8 +107,8 @@ gdrive_dir <- function(shared_id = c("Analytics")) {
   cat("Shared Drive:", gdrive_dribble$name, "\n")
   
   # Format the output
-  out <- as.data.table(folders_dt[, c("gdrive_path", "files")])
-  out <- out[order(out$gdrive_path)]
+  out <- folders_dt[, c("gdrive_path", "files")]
+  out <- out[order(out$gdrive_path), ]
   out$abbr_name <- gsub("([^/]+)(?=/.+)", "..", out$gdrive_path, perl = T)  # close, just a bit too much
   out$nchar <- nchar(out$abbr_name)
   out$ws <- max(out$nchar) - out$nchar  
@@ -116,8 +119,7 @@ gdrive_dir <- function(shared_id = c("Analytics")) {
 
 #======================================================================================================================#
 
-# This function takes a path name from a shared drive and returns a single-row dribble to be used as the target folder 
-# for uploads and downloads
+#' *Sets a folder in the Gdrive as target location for uploads and downloads*
 gdrive_set_dribble <- function(gdrive_path, shared_id = "Analytics"){
   # `gdrive_path` is the google drive path of the one folder you want you target for uploads and downloads.
   
@@ -152,8 +154,8 @@ gdrive_set_dribble <- function(gdrive_path, shared_id = "Analytics"){
 
 #======================================================================================================================#
 
-# This function shows all files, and not folders, within the a specified folder, referenced by name. This function is 
-# really only for reference, and intentionally does not give results in dribble class.
+#' *This function shows all files, and not folders, within the a specified folder, referenced by name.* Only for 
+#' reference, and intentionally does not give results in dribble class.
 gdrive_ls <- function(gdrive_dribble){
 
   if( !googledrive::is_dribble(gdrive_dribble) | nrow(gdrive_dribble) != 1) {
