@@ -137,14 +137,15 @@ gdrive_set_dribble <- function(gdrive_path, shared_id = "Analytics"){
     sapply(dribble_out$drive_resource, "[[", "mimeType") == "application/vnd.google-apps.folder", 
   ]
   if( nrow(dribble_out) == 0 ){
-    stop(paste0("Path ", crayon::bold(gdrive_path), " was not found!"))
+    stop(paste0("Path ", crayon::yellow(gdrive_path), " was not found!"))
   } else if( nrow(dribble_out) > 1 ){
     stop({
       cat(paste0(
-        "Path name ", crayon::bold(gdrive_path), " is not specific enough. ", nrow(dribble_out), " matches found.\n"
+        "Path name ", crayon::yellow(gdrive_path), " is not specific enough. ", nrow(dribble_out), " matches found.\n"
       ))
     })
   } else if ( nrow(dribble_out) == 1 ){
+    dribble_out$shared_drive_id <- id
     dribble_out
   }
 }
@@ -189,7 +190,7 @@ gdrive_ls <- function(gdrive_dribble){
 
 #======================================================================================================================#
 
-# A helper function to parse a local path into its directory, file name, and file extension.
+#' *A helper function to parse a local path into its directory, file name, and file extension.*
 parse_local_path <- function(local_path){
   
   # Error checks
@@ -199,17 +200,11 @@ parse_local_path <- function(local_path){
   if( !file_test(op = "-f",  local_path) ) local_exists <- F else local_exists <- T
   
   # Get the name of the file (remove the directory, anything left if the final "/")
-  name <- sub("^.*[/]", "", local_path)
+  name <- basename(local_path)
   
-  # Identify the extension and exclude it from the
-  if( grepl(pattern = "^(.+)[.?](.+)$", x = name) ) {
-    # If an extension is found, grab it
-    extension <- sub(pattern = "^(.*)(?=[.])", "", name, perl = T)  # Omit everything to the left of the last period
-  } else {
-    # If an extension is not found, throw an error
-    stop(paste0("'local_path' needs to have the file extension specified."))
-  }
-  # Get the file name without the extension
+  # Identify the extension and exclude it from the file name
+  extension <- paste0(".", tools::file_ext(name))
+  if( extension == ".") stop(paste0("'local_path' needs to have the file extension specified."))
   name_no_ext <- sub(extension, "", name)
   
   # Determine whether a version suffix is present in the file name
@@ -221,12 +216,13 @@ parse_local_path <- function(local_path){
   # Return the parsed path
   list(
     path = local_path, name = name, directory = directory, name_no_ext = name_no_ext, 
-    extension = extension, ver_flag = ver_flag, local_exists = local_exists)
+    extension = extension, ver_flag = ver_flag, local_exists = local_exists
+  )
 }
 
 #======================================================================================================================#
 
-#' *A helper function to parse a google drive folder*, using the outputs of parse_local_path() to determine which
+#' *A helper function to parse a Google drive folder*, using the outputs of parse_local_path() to determine which
 #' files to search for.
 parse_dribble <- function(gdrive_dribble, l_path) {
 
@@ -583,5 +579,5 @@ gdrive_download <- function(local_path, gdrive_dribble, ver = NULL) {
 
 #======================================================================================================================#
 
-#' *View the revision history of a file on the Gdrive*
+#' *View the revision history of a file on the Gdrive*, including the modification dates, modifying user, and size.
 gdrive_versions("new_data_test2.rdata", v2_dribble)
