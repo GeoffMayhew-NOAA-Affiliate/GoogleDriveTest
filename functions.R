@@ -226,74 +226,68 @@ parse_local_path <- function(local_path){
 
 #======================================================================================================================#
 
-# A helper function to parse the google drive dribble, using the outputs of parse_local_path() to determine which files
-# to search for.
+#' *A helper function to parse a google drive folder*, using the outputs of parse_local_path() to determine which
+#' files to search for.
 parse_dribble <- function(gdrive_dribble, l_path) {
 
   # Can the Gdrive folder be found?
   if( !googledrive::is_dribble(gdrive_dribble) ) {
     stop(paste0(
-      "'gdrive_dribble' must be specified as a dribble. Use ", italic("gdrive_set_dribble()"), " to do this."
+      "'gdrive_dribble' must be specified as a dribble. Use ", crayon::bold("gdrive_set_dribble()"), " to do this."
     ))
   }
   if( nrow(gdrive_dribble) != 1 ) stop("'gdrive_dribble' must be 1 row.")
   
-  # Identify all folders/files in the Gdrive path
-  gdrive_items <- googledrive::drive_ls(gdrive_dribble)
+  # use drive_get to see if the file already exists on the gdrive, and store it as a dribble. We don't want to use
+  # case-sensitivity with these checks. Could also use drive_get using path (ignores case sensitivity), but is slower.
+  gdrive_folder_items <- googledrive::drive_ls(gdrive_dribble)
+  gdrive_item <- gdrive_folder_items[which(tolower(gdrive_folder_items$name) == tolower(l_path$name)), ]
   
-  # If l_path has a version number, find that item specifically, Otherwise, match by name.
-  if( l_path$ver_flag ) {
+  # If nrow(gdrive_item) > 0, then check to see if the file has a version history
+  if( nrow(gdrive_item) > 1 ){
+    # If more than one files are matched, big problem!
+    stop(paste0("More than one file in the specified Gdrive folder has the name: ", crayon::bold(l_path$name), " ! Need to delete one!"))
+  } else if ( nrow(gdrive_item) == 1 ) {
+    # If the file already exists, check how many versions (revisions) exist and get info for each
+    revision_lst <- googledrive::do_request(
+      googledrive::request_generate(
+        endpoint = "drive.revisions.list", params = list(fileId = gdrive_item$id, fields = "*")
+      )
+    )$revisions
     
-    # If a version flag is in l_path, does the specified version exist in the gdrive?
-    ver_exists <- l_path$name == gdrive_items$name
-    if( sum(ver_exists) == 1 ){
-      gdrive_file <- gdrive_items[ver_exists, ]
-    } else if( sum(ver_exists) > 1) {
-      stop(paste0("File name is not unique!"))
-    } else {
-      stop(cat(paste0(crayon::bold(l_path$name), " not found in ", crayon::bold(gdrive_dribble$name))))
+    # Format the modified datetimes
+    rev_mtime_vec <- sapply(revision_lst, "[[", "modifiedTime")
+    rev_mtime_vec <- as.POSIXct(sapply(rev_mtime_vec, function(x) {
+      format(
+        as.POSIXct(x, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "GMT" , origin = "1970-01-01"),
+        tz = Sys.timezone(), usetz = T
+      )
+    }, USE.NAMES = F))
+    for(i in seq_along(revision_lst)) revision_lst[[i]]$modifiedTime <- rev_mtime_vec[i]
+    # Check to make sure revisions are listed in order of modifiedTime, the most recent first and oldest last!
+    if( any(diff(rev_mtime_vec) < 0) ) {
+      stop(paste0(
+        "parse_dribble(): ", crayon::bold(l_path$name), "'s revision_lst is not ordered by modifiedTime! Fix this!"
+      ))
+    }
+    # Check to make sure keepForever is checked for all versions
+    if( any(sapply(revision_lst, "[[", "keepForever") != T) ){
+      warning(cat(paste0(
+        "Versions ", paste0(which(sapply(revision_lst, "[[", "keepForever") != T), collapse = ", "), 
+        "have keepForever = FALSE!\n"
+      )))
     }
     
-  } else {
-    # If a version flag is absent, search for all files with a similar l_path$name
-    files_like_name_l <- grepl(
-      pattern = paste0("^", l_path$name_no_ext, "_v[0-9]{3}", l_path$extension, "$"), 
-      x = gdrive_items$name, ignore.case = T)
-    gdrive_file <- gdrive_items[files_like_name_l, ]
-  }
+  } else if ( nrow(gdrive_item) == 0 ){
+    # If no files are found, set modified times to null
+    revision_lst <- NULL
+  } 
   
-  # Get the create dates (when each file was uploaded to the Gdrive)
-  if( nrow(gdrive_file) > 0 ){
-    create_dates <- as.POSIXlt(
-      sapply(gdrive_file$drive_resource, "[[", "createdTime"), 
-      format = "%Y-%m-%dT%H:%M:%OS", tz = "GMT")
-    # Ensure the files are sorted by create dates
-    date_order <- order(create_dates, decreasing = T)
-    create_dates <- create_dates[date_order]
-    gdrive_file <- gdrive_file[date_order, ]
-  } else create_dates <- NULL
-  
-  # Check if any files have duplicated names.
-  if( any(duplicated(gdrive_file$name)) ){
-    warning(paste0(
-      "Gdrive files ", crayon::bold(paste0(unique(gdrive_file$name[duplicated(gdrive_file$name)]), collapse = ", " )), 
-      " have duplicated file names. Fix this!"
-    ))
-  }
-  
-  # Make sure the order of create dates is in the same order of the version numbers.
-  if( 
-    any(diff(as.integer(sub(
-      "(.+)_v(?=[0-9]{3})", "", sub(paste0(l_path$extension, "$"), "", gdrive_file$name), perl = T
-    ))) >= 1)
-  ){
-    warning(paste0("Version numbers and create dates of Gdrive files are not in the same order! Fix this!"))
-  }
-
-  # Return dribble of Gdrive files and vector of create dates using local timezone
+  # Prepare outputs
   list(
-    files = gdrive_file, c_date_og = create_dates, 
-    c_date = format(as.POSIXct(create_dates), tz = Sys.timezone(), usetz = T)
+    gdrive_item = gdrive_item,
+    revision_lst = revision_lst,
+    current_ver = length(revision_lst)
   )
 }
 
