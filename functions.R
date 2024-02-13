@@ -410,7 +410,7 @@ gdrive_upload <- function(local_path, gdrive_dribble) {
     #' *Update File - If the file already exists on the gdrive, and the local is ahead, update the file*
     
     # Compare the file sizes and modified dates of the local file and the head gdrive file
-    compare_res <- compare_local_and_gdrive2(l_path, g_path)
+    compare_res <- compare_local_and_gdrive(l_path, g_path)
     
     # Decide whether to update the existing file
     if( compare_res$identical ) {
@@ -489,7 +489,7 @@ gdrive_download <- function(local_path, gdrive_dribble, ver = NULL) {
     #' *Downloading the most recent version*
     if( l_path$local_exists ){
       # If a local version already exists, compare it with the gdrive version
-      compare_res <- compare_local_and_gdrive2(l_path, g_path)
+      compare_res <- compare_local_and_gdrive(l_path, g_path)
       
       if( compare_res$local_status %in% c("up to date with", "ahead of") ){
         #' *If the local is ahead or up to date, skip the download*
