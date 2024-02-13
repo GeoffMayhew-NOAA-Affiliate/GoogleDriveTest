@@ -2,8 +2,6 @@
 # Functions for GoogleDriveTest repository. Developing functions for streamlining workflow with Shared Google Drive.
 
 # Make sure required packages are installed
-if( !require("data.table", quietly = T) ) install.packages("data.table")   #' TODO *Remove dependency on data.table!*
-
 if( !require("rstudioapi", quietly = T) ) install.packages("rstudioapi")
 if( !any(installed.packages()[, 1] == "googledrive") ) install.packages("googledrive")
 # We want to make sure googledrive package is installed, but not necessarily loaded. Ideally, we will call googledrive::
@@ -170,7 +168,7 @@ gdrive_ls <- function(gdrive_dribble){
   ]
   
   if( nrow(dribble_items) == 0 ){
-    cat(paste0("No files exist in ", crayon::bold(gdrive_dribble$path), ".\n"))
+    cat(paste0("No files exist in ", crayon::yellow(gdrive_dribble$path), ".\n"))
   } else {
     # Include the create dates in the output
     create_dates <- create_dates <- as.POSIXlt(
@@ -609,22 +607,23 @@ gdrive_versions <- function(gdrive_file, gdrive_dribble){
   rev_info <- lapply(revision_lst, "[", c("modifiedTime", "size", "keepForever"))
   rev_user <- lapply(lapply(revision_lst, "[[", "lastModifyingUser"), "[[", "displayName")
   rev_info <- mapply(function(x, y) append(x, c(modifiedBy = y)), x = rev_info, y = rev_user, SIMPLIFY = F)
-  
-  # Format the modified date
+
+  # Format the modified dates and file sizes
   for(i in seq_along(rev_info)) {
     rev_info[[i]]$modifiedTime <- format(
       as.POSIXct(rev_info[[i]]$modifiedTime , format = "%Y-%m-%dT%H:%M:%OSZ", tz = "GMT" , origin = "1970-01-01"),
       tz = Sys.timezone(), usetz = T
     )
+    rev_info[[i]]$size <- utils:::format.object_size(as.numeric(rev_info[[i]]$size), units = "auto")
   }
-  
+
   # Convert to data.frame
   rev_info_df <- do.call(rbind, lapply(rev_info , as.data.frame))
   rev_info_df$Version <- seq_along(rev_info)
   rev_info_df <- rev_info_df[, c("Version", "modifiedTime", "modifiedBy", "size", "keepForever")]
   
   # Outputs
-  cat(crayon::yellow(paste0(v2_dribble$path, gdrive_file)), "\n")
+  cat(crayon::yellow(paste0(gdrive_dribble$path, gdrive_file)), "\n")
   rev_info_df[rev(seq_along(rev_info)), ]
   
 }
